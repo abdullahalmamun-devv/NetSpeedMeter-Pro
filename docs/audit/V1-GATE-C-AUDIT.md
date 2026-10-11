@@ -98,7 +98,7 @@ Total verification outcome: **162 checks passed, 1 check skipped (explicit platf
 - **Repair Applied:**
   1. Defined `disableClickThroughMenuItem` as a first-class named field (`Name = "DisableClickThroughMenuItem"`, `Tag = "DisableClickThrough"`).
   2. Exposed `internal Forms.ToolStripMenuItem DisableClickThroughMenuItem => this.disableClickThroughMenuItem;`.
-  3. Maintained index 4 compatibility while ensuring semantic lookups work regardless of position.
+  3. Established zero-index semantic recovery via Name/Tag and typed property, eliminating any reliance on menu position.
   4. Confirmed full recovery cycle in WPF smoke test (`ClickThroughBeforeShow: True`, `ClickThroughRecoveredViaTray: True`).
 
 ### 4.6 Data Export Integrity & Security
@@ -198,9 +198,33 @@ Modelled 5 deterministic heterogeneous multi-monitor topologies in `V1Wave3Fixtu
 
 ---
 
-## 7. Final Gate C Closure Verdict
+## 7. Final Native Coordinate & UI Truth Closure Addendum
 
-All coordinate space, PerMonitorV2, Quick Panel, Taskbar Companion, and Tray safety requirements are forensically proven and verified:
+### 7.1 Single Positioning Authority (DEF-C09)
+- **Root Cause:** In `QuickPanelWindow.PositionNearPhysical`, assigning `Left = placed.Left / scale; Top = placed.Top / scale;` after native `SetWindowPos` reintroduced global physical origin division by local monitor DPI scale and caused a second, conflicting WPF placement operation.
+- **Repair:** Established native Win32 `SetWindowPos` as the single authoritative placement operation. Removed all post-`SetWindowPos` WPF DIP coordinate assignments.
+- **Verification:** `W3-QUICKPANEL-NEGATIVE-ORIGIN-HWND` proves an anchor at physical X=-2000 on a 150% secondary monitor (-2560..0) remains in physical negative coordinates and is NOT corrupted to -1333 DIP equivalent.
 
-**Final Determination:**  
-**`GATE C FULLY CLOSED — NEXT V1 WAVE AUTHORIZED`**
+### 7.2 PerMonitorV2 Window DPI Authority (DEF-C10)
+- **Root Cause:** `PlacementHelper.QueryMonitorDetails` invoked `GetDpiForMonitor`, which Microsoft guidance prohibits in PerMonitorV2-aware processes.
+- **Repair:** Completely removed `GetDpiForMonitor` from the codebase. Established `GetDpiForWindow(hwnd)` as the sole PerMonitorV2 DPI authority. For source window anchors, queries `GetDpiForWindow(sourceHwnd)`. For free-floating anchors, temporarily binds HWND to target coordinates to query `GetDpiForWindow(hwnd)`. Fixed `QuickPanelWindow.DesignWidthDip` (280 DIP) and `DesignHeightDip` (300 DIP) to enforce exact window size contracts ($280 \times 1.5 = 420$ px).
+- **Verification:** `W3-QUICKPANEL-DPI-TRANSITIONS` verified across 100% (280px) $\to$ 150% (420px) $\to$ 200% (560px) $\to$ 100% (280px).
+
+### 7.3 Degradation Axis Decoupling (DEF-C11)
+- **Root Cause:** `MainWindow` inferred storage degradation from generic `CollectorState.Degraded`, causing network provider disconnects to trigger false "Storage Degraded" warnings.
+- **Repair:** Added `StorageHealth` enum to `SpeedMeter.Core`. Added typed `StorageHealth` property to `CollectorSnapshot`. `MainWindow` now specifically drives the storage degradation banner from `snapshot.StorageHealth == StorageHealth.Degraded`, while network/provider issues are displayed on the measurement axis in `StatusText`.
+- **Verification:** `W3-STORAGE-DEGRADATION-UI-SEMANTICS` verified across Case A (Collector Degraded + Storage Healthy $\to$ banner collapsed), Case B (Storage Degraded $\to$ banner visible with typed reason), and Case C (Provider Unavailable + Storage Healthy $\to$ measurement status updated, storage banner collapsed).
+
+### 7.4 Individual Primary Navigation Assertions (DEF-C12)
+- **Root Cause:** Smoke test verified only the final Overview state, failing to independently prove the visibility of each individual primary page.
+- **Repair:** Expanded `scripts/smoke.ps1` and `MainWindow.xaml.cs` to assert each of the 5 primary destinations individually (Overview, Live Traffic, Apps, Usage & History, Network Tools) and secondary Settings navigation.
+- **Verification:** All 18 native assertions verified `True` in `smoke.json`.
+
+---
+
+## 8. Final Authoritative Decision
+
+```text
+GATE C FULLY AND CORRECTLY CLOSED — NEXT V1 WAVE AUTHORIZED
+```
+

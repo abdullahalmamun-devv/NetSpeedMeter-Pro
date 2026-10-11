@@ -9,6 +9,9 @@ namespace SpeedMeter.App.Views;
 
 public partial class QuickPanelWindow : Window
 {
+    public const double DesignWidthDip = 280.0;
+    public const double DesignHeightDip = 300.0;
+
     public QuickPanelWindow(QuickPanelViewModel viewModel)
     {
         InitializeComponent();
@@ -35,11 +38,20 @@ public partial class QuickPanelWindow : Window
     }
 
     /// <summary>
-    /// Positions the Quick Panel adjacent to a known source window, deriving its native physical anchor and monitor DPI.
+    /// Positions the Quick Panel adjacent to a known source window, deriving its native physical anchor and window DPI.
+    /// Uses GetDpiForWindow on the source HWND as the PerMonitorV2 DPI authority.
     /// </summary>
     public PhysicalRect PositionNear(Window sourceWindow, PhysicalRect? workAreaOverride = null)
     {
         if (sourceWindow == null) throw new ArgumentNullException(nameof(sourceWindow));
+
+        uint? sourceDpi = null;
+        var sourceHwnd = new WindowInteropHelper(sourceWindow).Handle;
+        if (sourceHwnd != 0)
+        {
+            var dpi = PlacementHelper.GetDpiForWindow(sourceHwnd);
+            if (dpi > 0) sourceDpi = dpi;
+        }
 
         if (!PlacementHelper.TryGetWindowPhysicalRect(sourceWindow, out var anchor))
         {
@@ -51,7 +63,7 @@ public partial class QuickPanelWindow : Window
                 (int)Math.Round((sourceWindow.ActualHeight > 0 ? sourceWindow.ActualHeight : sourceWindow.Height) * dpi.DpiScaleY));
         }
 
-        return PositionNearPhysical(anchor, workAreaOverride);
+        return PositionNearPhysical(anchor, workAreaOverride, sourceDpi);
     }
 
     /// <summary>
@@ -72,31 +84,37 @@ public partial class QuickPanelWindow : Window
 
     /// <summary>
     /// Positions the Quick Panel adjacent to an explicit PhysicalRect anchor.
-    /// Resolves target monitor, converts window dimensions using monitor DPI, executes physical placement clamping,
-    /// and positions native HWND via Win32 SetWindowPos.
+    /// Resolves target monitor work area, resolves PerMonitorV2 DPI via GetDpiForWindow,
+    /// executes physical placement clamping, and positions native HWND via Win32 SetWindowPos.
+    /// Native HWND placement is the single authoritative placement operation; does not perform
+    /// secondary WPF DIP assignments that corrupt PerMonitorV2 virtual desktop origins.
     /// </summary>
-    public PhysicalRect PositionNearPhysical(PhysicalRect physicalAnchor, PhysicalRect? workAreaOverride = null)
+    public PhysicalRect PositionNearPhysical(PhysicalRect physicalAnchor, PhysicalRect? workAreaOverride = null, uint? dpiOverride = null)
     {
         var hwnd = new WindowInteropHelper(this).EnsureHandle();
 
-        PhysicalRect workArea;
-        uint targetDpi;
+        var workArea = workAreaOverride ?? PlacementHelper.GetMonitorInfoForRect(physicalAnchor).WorkArea;
 
-        if (workAreaOverride.HasValue)
+        uint targetDpi = 96;
+        if (dpiOverride.HasValue)
         {
-            workArea = workAreaOverride.Value;
-            targetDpi = 96;
+            targetDpi = dpiOverride.Value;
         }
-        else
+        else if (hwnd != 0)
         {
-            var monitorInfo = PlacementHelper.GetMonitorInfoForRect(physicalAnchor);
-            workArea = monitorInfo.WorkArea;
-            targetDpi = monitorInfo.Dpi;
+            // Position HWND at anchor coordinates without activating or redrawing so Windows binds it to target monitor
+            PlacementHelper.SetWindowPos(
+                hwnd, 0,
+                physicalAnchor.Left, physicalAnchor.Top, 1, 1,
+                PlacementHelper.SWP_NOSIZE | PlacementHelper.SWP_NOZORDER | PlacementHelper.SWP_NOACTIVATE);
+
+            var dpi = PlacementHelper.GetDpiForWindow(hwnd);
+            targetDpi = dpi > 0 ? dpi : 96;
         }
 
         double scale = targetDpi / 96.0;
-        int targetWidthPx = (int)Math.Round(Width * scale);
-        int targetHeightPx = (int)Math.Round(Height * scale);
+        int targetWidthPx = (int)Math.Round(DesignWidthDip * scale);
+        int targetHeightPx = (int)Math.Round(DesignHeightDip * scale);
 
         var placed = PlacementHelper.CalculatePlacement(physicalAnchor, targetWidthPx, targetHeightPx, workArea);
 
@@ -108,16 +126,16 @@ public partial class QuickPanelWindow : Window
                 PlacementHelper.SWP_NOZORDER | PlacementHelper.SWP_NOACTIVATE);
         }
 
-        // Set WPF DIP properties for layout consistency
-        Left = placed.Left / scale;
-        Top = placed.Top / scale;
-
+        // Single positioning authority: native HWND placement above is authoritative.
+        // We do NOT perform post-SetWindowPos WPF Left/Top assignments because dividing
+        // global physical virtual desktop origins by local monitor scale is invalid under PerMonitorV2.
         return placed;
     }
 
     /// <summary>
     /// Legacy overload accepting generic WPF Rect objects for backward compatibility with existing tests.
     /// </summary>
+    [Obsolete("Use PositionNearPhysical(PhysicalRect) for PerMonitorV2 coordinate safety.", error: false)]
     public void PositionNear(Rect target, Rect? workAreaOverride = null)
     {
         var physTarget = new PhysicalRect(

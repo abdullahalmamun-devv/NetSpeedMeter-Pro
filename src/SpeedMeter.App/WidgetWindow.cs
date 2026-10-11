@@ -12,7 +12,7 @@ using System.ComponentModel;
 
 namespace SpeedMeter.App;
 
-internal sealed class WidgetWindow : Window
+public sealed class WidgetWindow : Window
 {
     private const int GWL_EXSTYLE = -20;
     private const int WS_EX_TRANSPARENT = 0x00000020;
@@ -252,7 +252,7 @@ internal sealed class WidgetWindow : Window
         EnsureVisibleOnScreen();
     }
 
-    internal void EnsureVisibleOnScreen()
+    public void EnsureVisibleOnScreen()
     {
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == 0 || !GetWindowRect(hwnd, out var rect)) return;

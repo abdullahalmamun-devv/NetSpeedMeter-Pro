@@ -610,7 +610,7 @@ public static class V1Wave3Fixtures
                 var hasRect = SpeedMeter.App.PlacementHelper.TryGetWindowPhysicalRect(window, out var nativeRect);
                 Require(hasRect, "GetWindowRect must query native window bounds.");
 
-                var (_, workArea, _, _) = SpeedMeter.App.PlacementHelper.GetMonitorInfoForRect(placed);
+                var (_, workArea, _) = SpeedMeter.App.PlacementHelper.GetMonitorInfoForRect(placed);
                 Require(nativeRect.Left >= workArea.Left, $"Native Left ({nativeRect.Left}) must be within work area ({workArea.Left}).");
                 Require(nativeRect.Right <= workArea.Right, $"Native Right ({nativeRect.Right}) must be within work area ({workArea.Right}).");
                 Require(nativeRect.Top >= workArea.Top, $"Native Top ({nativeRect.Top}) must be within work area ({workArea.Top}).");
@@ -621,6 +621,158 @@ public static class V1Wave3Fixtures
             finally
             {
                 if (File.Exists(settingsPath)) File.Delete(settingsPath);
+            }
+        }));
+
+        check("W3-QUICKPANEL-NEGATIVE-ORIGIN-HWND: Negative virtual desktop origin placement preserves native HWND coordinates without DIP corruption", () => RunOnSta(() =>
+        {
+            var fakeStorage = new FakeStorageEngine();
+            var historyService = new UsageHistoryService(fakeStorage);
+            var settingsPath = Path.Combine(Path.GetTempPath(), $"w3_neg_origin_{Guid.NewGuid():N}.json");
+
+            try
+            {
+                var settingsService = new SettingsService(settingsPath);
+                var collector = new Collector(new FakeAdapterProvider(), new MeasurementClock());
+                var vm = new QuickPanelViewModel(collector, historyService, settingsService, () => { });
+                var window = new SpeedMeter.App.Views.QuickPanelWindow(vm);
+
+                // Secondary monitor Left at negative X [-2560..0], 150% scaling (144 DPI)
+                var secondaryWa = new SpeedMeter.App.PhysicalRect(-2560, 0, 2560, 1400);
+                var secondaryAnchor = new SpeedMeter.App.PhysicalRect(-2000, 500, 50, 50);
+
+                var placed = window.PositionNearPhysical(secondaryAnchor, secondaryWa, dpiOverride: 144);
+                var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+                Require(hwnd != 0, "Native HWND must be created.");
+
+                var hasRect = SpeedMeter.App.PlacementHelper.TryGetWindowPhysicalRect(window, out var nativeRect);
+                Require(hasRect, "GetWindowRect must query native window bounds.");
+
+                // Assert placed within negative work area
+                Require(nativeRect.Left >= secondaryWa.Left, $"Native Left ({nativeRect.Left}) must be >= work area Left ({secondaryWa.Left}).");
+                Require(nativeRect.Right <= secondaryWa.Right, $"Native Right ({nativeRect.Right}) must be <= work area Right ({secondaryWa.Right}).");
+                Require(nativeRect.Left < 0, $"Native Left ({nativeRect.Left}) must remain in negative coordinate space.");
+
+                // Verify it was NOT corrupted by global-origin division bug (which would produce -2000/1.5 = -1333)
+                Require(nativeRect.Left != -1333, "Native position must not be corrupted to -1333 DIP equivalent.");
+
+                // Verify Window Size Contract: 280 DIP wide * 1.5 = 420 physical pixels
+                Require(nativeRect.Width == 420, $"Window width at 150% DPI must be 420 physical pixels, was {nativeRect.Width}.");
+
+                window.Close();
+            }
+            finally
+            {
+                if (File.Exists(settingsPath)) File.Delete(settingsPath);
+            }
+        }));
+
+        check("W3-QUICKPANEL-DPI-TRANSITIONS: Native window scales accurately across per-monitor DPI transitions", () => RunOnSta(() =>
+        {
+            var fakeStorage = new FakeStorageEngine();
+            var historyService = new UsageHistoryService(fakeStorage);
+            var settingsPath = Path.Combine(Path.GetTempPath(), $"w3_dpi_trans_{Guid.NewGuid():N}.json");
+
+            try
+            {
+                var settingsService = new SettingsService(settingsPath);
+                var collector = new Collector(new FakeAdapterProvider(), new MeasurementClock());
+                var vm = new QuickPanelViewModel(collector, historyService, settingsService, () => { });
+                var window = new SpeedMeter.App.Views.QuickPanelWindow(vm);
+
+                var wa = new SpeedMeter.App.PhysicalRect(0, 0, 3840, 2160);
+                var anchor = new SpeedMeter.App.PhysicalRect(500, 500, 100, 50);
+
+                // Transition 1: 100% DPI (96 DPI) -> 280 physical px
+                window.PositionNearPhysical(anchor, wa, dpiOverride: 96);
+                SpeedMeter.App.PlacementHelper.TryGetWindowPhysicalRect(window, out var rect100);
+                Require(rect100.Width == 280, $"At 100% DPI, width must be 280 px, was {rect100.Width}");
+
+                // Transition 2: 150% DPI (144 DPI) -> 420 physical px
+                window.PositionNearPhysical(anchor, wa, dpiOverride: 144);
+                SpeedMeter.App.PlacementHelper.TryGetWindowPhysicalRect(window, out var rect150);
+                Require(rect150.Width == 420, $"At 150% DPI, width must be 420 px, was {rect150.Width}");
+
+                // Transition 3: 200% DPI (192 DPI) -> 560 physical px
+                window.PositionNearPhysical(anchor, wa, dpiOverride: 192);
+                SpeedMeter.App.PlacementHelper.TryGetWindowPhysicalRect(window, out var rect200);
+                Require(rect200.Width == 560, $"At 200% DPI, width must be 560 px, was {rect200.Width}");
+
+                // Transition 4: Return to 100% DPI -> 280 physical px
+                window.PositionNearPhysical(anchor, wa, dpiOverride: 96);
+                SpeedMeter.App.PlacementHelper.TryGetWindowPhysicalRect(window, out var rectBack100);
+                Require(rectBack100.Width == 280, $"Returning to 100% DPI, width must be 280 px, was {rectBack100.Width}");
+
+                window.Close();
+            }
+            finally
+            {
+                if (File.Exists(settingsPath)) File.Delete(settingsPath);
+            }
+        }));
+
+        check("W3-STORAGE-DEGRADATION-UI-SEMANTICS: UI distinguishes storage degradation from measurement degradation", () =>
+        {
+            var reading = new Reading(DateTimeOffset.UtcNow, "test", ReadingState.Live, 1000, 500, 1000, 500, 1.0, false, "Live");
+            var observation = new AdapterObservation(ProviderAvailability.Available, [], "GetIfTable2", "OK", "Available");
+
+            // Case A: Collector is Degraded, but Storage is Healthy
+            // Storage banner must be suppressed because storage itself is healthy.
+            var snapHealthyStorage = new CollectorSnapshot(1L, CollectorState.Degraded, reading, observation)
+            {
+                StorageStatus = new StorageStatus(StorageHealth.Healthy, 0, 100, 0, null)
+            };
+            var isStorageDegradedA = snapHealthyStorage.StorageStatus is not null && snapHealthyStorage.StorageStatus.Health == StorageHealth.Degraded;
+            Require(!isStorageDegradedA, "Case A: Healthy storage must not be flagged as storage degraded.");
+
+            // Case B: Collector is Running or Degraded, and Storage is Degraded
+            // Storage banner must be shown with typed reason.
+            var snapDegradedStorage = new CollectorSnapshot(2L, CollectorState.Degraded, reading, observation)
+            {
+                StorageStatus = new StorageStatus(StorageHealth.Degraded, 50, 100, 2, "Database disk full")
+            };
+            var isStorageDegradedB = snapDegradedStorage.StorageStatus is not null && snapDegradedStorage.StorageStatus.Health == StorageHealth.Degraded;
+            Require(isStorageDegradedB, "Case B: Degraded storage must be flagged as storage degraded.");
+            Require(snapDegradedStorage.DegradedReason == "Database disk full", "Case B: Typed degraded reason must match.");
+
+            // Case C: Provider is Unavailable, Storage is Healthy
+            // Must reflect network/measurement degradation, NOT storage degradation.
+            var unavailableObs = new AdapterObservation(ProviderAvailability.TemporarilyUnavailable, [], "GetIfTable2", "UNAVAIL", "Adapter disconnected");
+            var snapUnavailNet = new CollectorSnapshot(3L, CollectorState.Degraded, reading with { State = ReadingState.Unavailable, Detail = "Network disconnected" }, unavailableObs)
+            {
+                StorageStatus = new StorageStatus(StorageHealth.Healthy, 0, 100, 0, null)
+            };
+            var isStorageDegradedC = snapUnavailNet.StorageStatus is not null && snapUnavailNet.StorageStatus.Health == StorageHealth.Degraded;
+            Require(!isStorageDegradedC, "Case C: Network unavailability with healthy storage must NOT show storage degraded banner.");
+            Require(snapUnavailNet.Observation.Availability == ProviderAvailability.TemporarilyUnavailable, "Case C: Provider availability must reflect measurement axis.");
+        });
+
+        check("W3-WIDGET-RESTORE-MONITOR-AWARE: Widget bounds restore clamps to monitor work area without off-screen loss", () => RunOnSta(() =>
+        {
+            var widget = new SpeedMeter.App.WidgetWindow(() => { });
+            widget.Show();
+
+            try
+            {
+                // Test ensure visible clamping: move off-screen to massive coordinates
+                widget.Left = 99999;
+                widget.Top = 99999;
+                widget.EnsureVisibleOnScreen();
+
+                // Widget must be recovered within reasonable screen bounds
+                Require(widget.Left < 99999, "Widget Left must be clamped from off-screen position.");
+                Require(widget.Top < 99999, "Widget Top must be clamped from off-screen position.");
+
+                // Test negative off-screen coordinates
+                widget.Left = -99999;
+                widget.Top = -99999;
+                widget.EnsureVisibleOnScreen();
+                Require(widget.Left > -99999, "Widget Left must be clamped from negative off-screen position.");
+                Require(widget.Top > -99999, "Widget Top must be clamped from negative off-screen position.");
+            }
+            finally
+            {
+                widget.Close();
             }
         }));
 

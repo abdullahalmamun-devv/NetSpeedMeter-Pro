@@ -75,7 +75,6 @@ public static class PlacementHelper
 
     private const uint MONITOR_DEFAULTTOPRIMARY = 1;
     private const uint MONITOR_DEFAULTTONEAREST = 2;
-    private const int MDT_EFFECTIVE_DPI = 0;
 
     public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_NOMOVE = 0x0002;
@@ -96,8 +95,12 @@ public static class PlacementHelper
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetMonitorInfo(nint hMonitor, ref NativeMonitorInfo lpmi);
 
+    /// <summary>
+    /// PerMonitorV2 window DPI authority (Windows 10 1607+).
+    /// Returns the effective DPI for the window based on its monitor placement.
+    /// </summary>
     [DllImport("user32.dll")]
-    private static extern uint GetDpiForWindow(nint hwnd);
+    public static extern uint GetDpiForWindow(nint hwnd);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -110,9 +113,6 @@ public static class PlacementHelper
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-
-    [DllImport("shcore.dll", SetLastError = true)]
-    private static extern int GetDpiForMonitor(nint hmonitor, int dpiType, out uint dpiX, out uint dpiY);
 
     /// <summary>
     /// Pure, deterministic algorithm for placing a window adjacent to a target anchor in physical pixels.
@@ -155,6 +155,7 @@ public static class PlacementHelper
     /// <summary>
     /// Backward-compatible pure placement algorithm operating on explicit DipRect coordinates.
     /// </summary>
+    [Obsolete("Use PhysicalRect overload for PerMonitorV2 coordinate safety.", error: false)]
     public static DipRect CalculatePlacement(
         DipRect target,
         double windowWidthDip,
@@ -170,6 +171,7 @@ public static class PlacementHelper
     /// <summary>
     /// Legacy overload accepting generic WPF Rect objects for backward compatibility with existing fixtures.
     /// </summary>
+    [Obsolete("Use PhysicalRect overload for PerMonitorV2 coordinate safety.", error: false)]
     public static Rect CalculatePlacement(Rect target, double windowWidth, double windowHeight, Rect workArea)
     {
         var dipTarget = new DipRect(target.Left, target.Top, target.Width, target.Height);
@@ -179,9 +181,10 @@ public static class PlacementHelper
     }
 
     /// <summary>
-    /// Resolves target monitor details (HMonitor, physical work area, physical bounds, DPI) for a physical rectangle.
+    /// Resolves target monitor details (HMonitor, physical work area, physical bounds) for a physical rectangle.
+    /// Under PerMonitorV2, window DPI is owned by the window handle via GetDpiForWindow(hwnd), not monitor handles.
     /// </summary>
-    public static (nint HMonitor, PhysicalRect WorkArea, PhysicalRect MonitorBounds, uint Dpi) GetMonitorInfoForRect(PhysicalRect target)
+    public static (nint HMonitor, PhysicalRect WorkArea, PhysicalRect MonitorBounds) GetMonitorInfoForRect(PhysicalRect target)
     {
         var rc = new NativeRect { Left = target.Left, Top = target.Top, Right = target.Right, Bottom = target.Bottom };
         var hMon = MonitorFromRect(ref rc, MONITOR_DEFAULTTONEAREST);
@@ -191,7 +194,7 @@ public static class PlacementHelper
     /// <summary>
     /// Resolves target monitor details for a physical screen point.
     /// </summary>
-    public static (nint HMonitor, PhysicalRect WorkArea, PhysicalRect MonitorBounds, uint Dpi) GetMonitorInfoForPoint(PhysicalPoint pt)
+    public static (nint HMonitor, PhysicalRect WorkArea, PhysicalRect MonitorBounds) GetMonitorInfoForPoint(PhysicalPoint pt)
     {
         var p = new NativePoint { X = pt.X, Y = pt.Y };
         var hMon = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
@@ -201,35 +204,22 @@ public static class PlacementHelper
     /// <summary>
     /// Resolves target monitor details for an existing native window handle.
     /// </summary>
-    public static (nint HMonitor, PhysicalRect WorkArea, PhysicalRect MonitorBounds, uint Dpi) GetMonitorInfoForWindow(nint hwnd)
+    public static (nint HMonitor, PhysicalRect WorkArea, PhysicalRect MonitorBounds) GetMonitorInfoForWindow(nint hwnd)
     {
         var hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
         return QueryMonitorDetails(hMon);
     }
 
-    private static (nint HMonitor, PhysicalRect WorkArea, PhysicalRect MonitorBounds, uint Dpi) QueryMonitorDetails(nint hMon)
+    private static (nint HMonitor, PhysicalRect WorkArea, PhysicalRect MonitorBounds) QueryMonitorDetails(nint hMon)
     {
         if (hMon != 0)
         {
             var mi = new NativeMonitorInfo { cbSize = Marshal.SizeOf<NativeMonitorInfo>() };
             if (GetMonitorInfo(hMon, ref mi))
             {
-                uint dpi = 96;
-                try
-                {
-                    if (GetDpiForMonitor(hMon, MDT_EFFECTIVE_DPI, out var dpiX, out _) == 0 && dpiX > 0)
-                    {
-                        dpi = dpiX;
-                    }
-                }
-                catch
-                {
-                    dpi = 96;
-                }
-
                 var workArea = PhysicalRect.FromLTRB(mi.rcWork.Left, mi.rcWork.Top, mi.rcWork.Right, mi.rcWork.Bottom);
                 var bounds = PhysicalRect.FromLTRB(mi.rcMonitor.Left, mi.rcMonitor.Top, mi.rcMonitor.Right, mi.rcMonitor.Bottom);
-                return (hMon, workArea, bounds, dpi);
+                return (hMon, workArea, bounds);
             }
         }
 
@@ -237,7 +227,7 @@ public static class PlacementHelper
         // fallback to primary monitor work area derived from SystemParameters.WorkArea at baseline 96 DPI.
         var wa = SystemParameters.WorkArea;
         var fallbackWa = new PhysicalRect((int)Math.Round(wa.Left), (int)Math.Round(wa.Top), (int)Math.Round(wa.Width), (int)Math.Round(wa.Height));
-        return (0, fallbackWa, fallbackWa, 96);
+        return (0, fallbackWa, fallbackWa);
     }
 
     /// <summary>

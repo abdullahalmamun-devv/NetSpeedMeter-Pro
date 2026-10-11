@@ -85,5 +85,5 @@
 
 - **Host Environment:** Microsoft Windows 10 Pro x64 (build 10.0.19045.0), 4 logical processors, .NET 10.0.12 runtime. Developer evidence only; not a release port authorization.
 - **Observed:**
-  - 159 passed checks, 1 skipped check, 0 failed checks. Exit code: 0.
-  - UI smoke test passed with all 10 native assertions verified (`True`). Exit code: 0. Window geometry: 1160x780. Click-through tray recovery item index 4 verified.
+  - 169 passed checks, 1 skipped check, 0 failed checks. Exit code: 0.
+  - UI smoke test passed with all 18 native assertions verified (`True`). Exit code: 0. Window geometry: 1160x780. Click-through tray semantic recovery verified.

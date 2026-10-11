@@ -12,5 +12,6 @@ $result = Get-Content -LiteralPath (Join-Path $outputDir 'smoke.json') -Raw | Co
 if (-not $result.HasAdapter -or $result.ValidReadings -lt 2 -or -not $result.SnapshotMatches -or -not $result.UnitsMatch -or -not $result.PausePreservesTotals -or -not $result.ResetWhilePaused -or -not $result.ResumeIsLive) { throw 'UI smoke assertions failed.' }
 if (-not $result.ClickThroughBeforeShow -or -not $result.ClickThroughRecoveredViaTray -or -not $result.WidgetPausedTruthful -or -not $result.WidgetStatesTruthful) { throw 'Widget audit assertions failed.' }
 if (-not $result.QuickPanelSmokePass -or -not $result.NavDestinationsVerified -or -not $result.StorageBannerTruthful) { throw 'Product surface Wave 3 smoke assertions failed.' }
+if (-not $result.PrimaryNavOverviewVerified -or -not $result.PrimaryNavLiveTrafficVerified -or -not $result.PrimaryNavAppsVerified -or -not $result.PrimaryNavHistoryVerified -or -not $result.PrimaryNavToolsVerified -or -not $result.SecondaryNavSettingsVerified) { throw 'Primary navigation destination assertions failed.' }
 $result
 Write-Output "Screenshot and results: $outputDir"

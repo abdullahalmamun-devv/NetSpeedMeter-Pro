@@ -5,6 +5,17 @@ public enum ProviderAvailability
     Available, Partial, Unsupported, PermissionDenied, TemporarilyUnavailable, Failed
 }
 
+/// <summary>
+/// Authoritative storage health states for the persistence layer.
+/// Defined in SpeedMeter.Core to ensure WPF UI does not directly reference SpeedMeter.Storage.
+/// </summary>
+public enum StorageHealth
+{
+    Healthy,
+    Degraded,
+    Closed
+}
+
 /// <summary>One immutable observation from one named measurement method.</summary>
 public sealed class AdapterObservation
 {

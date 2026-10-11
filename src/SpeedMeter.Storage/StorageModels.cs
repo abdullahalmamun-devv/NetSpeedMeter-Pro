@@ -3,13 +3,6 @@ using SpeedMeter.Core;
 
 namespace SpeedMeter.Storage;
 
-public enum StorageHealth
-{
-    Healthy,
-    Degraded,
-    Closed
-}
-
 public sealed record StorageStatus(
     StorageHealth Health,
     long EnqueuedCommands,

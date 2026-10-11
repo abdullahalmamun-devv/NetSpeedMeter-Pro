@@ -72,22 +72,22 @@ public partial class MainWindow : Window
         HistoryViewControl.DataContext = viewModel.History;
         SettingsViewControl.DataContext = viewModel.Settings;
 
-        // Tray Setup (Preserving strict index 4 and exposing semantic identifier)
+        // Tray Setup (exposing typed and semantic identifier for click-through recovery)
         tray = new Forms.NotifyIcon { Icon = System.Drawing.SystemIcons.Application, Text = "SpeedMeter Pro · starting", Visible = true };
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Open dashboard", null, (_, _) => Dispatcher.Invoke(OpenDashboard));                       // Index 0
-        menu.Items.Add("Show / hide widget", null, (_, _) => Dispatcher.Invoke(() => { if (widget.IsVisible) widget.Hide(); else widget.Show(); })); // Index 1
-        menu.Items.Add("Reset widget position", null, (_, _) => Dispatcher.Invoke(() => { widget.ResetPosition(); widget.Show(); })); // Index 2
-        menu.Items.Add("Toggle widget lock", null, (_, _) => Dispatcher.Invoke(widget.ToggleLock));                // Index 3
+        menu.Items.Add("Open dashboard", null, (_, _) => Dispatcher.Invoke(OpenDashboard));
+        menu.Items.Add("Show / hide widget", null, (_, _) => Dispatcher.Invoke(() => { if (widget.IsVisible) widget.Hide(); else widget.Show(); }));
+        menu.Items.Add("Reset widget position", null, (_, _) => Dispatcher.Invoke(() => { widget.ResetPosition(); widget.Show(); }));
+        menu.Items.Add("Toggle widget lock", null, (_, _) => Dispatcher.Invoke(widget.ToggleLock));
         disableClickThroughMenuItem = new Forms.ToolStripMenuItem("Disable click-through", null, (_, _) => Dispatcher.Invoke(DisableWidgetClickThrough))
         {
             Name = "DisableClickThroughMenuItem",
             Tag = "DisableClickThrough"
         };
-        menu.Items.Add(disableClickThroughMenuItem);                                                               // Index 4 (Semantic identifier + index preserved)
-        menu.Items.Add("Pause / resume monitoring", null, (_, _) => monitor.TogglePause());                       // Index 5
-        menu.Items.Add("Quick panel", null, (_, _) => Dispatcher.Invoke(OpenQuickPanel));                         // Index 6
-        menu.Items.Add("Quit", null, (_, _) => Dispatcher.Invoke(Quit));                                           // Index 7
+        menu.Items.Add(disableClickThroughMenuItem);
+        menu.Items.Add("Pause / resume monitoring", null, (_, _) => monitor.TogglePause());
+        menu.Items.Add("Quick panel", null, (_, _) => Dispatcher.Invoke(OpenQuickPanel));
+        menu.Items.Add("Quit", null, (_, _) => Dispatcher.Invoke(Quit));
         tray.ContextMenuStrip = menu;
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(OpenDashboard);
 
@@ -227,18 +227,37 @@ public partial class MainWindow : Window
                 var quickPanelClosed = !quickPanel.IsVisible;
                 var quickPanelSmokePass = quickPanelOpened && quickPanelClosed;
 
-                SetActiveView("LiveTraffic");
-                SetActiveView("Apps");
-                SetActiveView("History");
-                SetActiveView("Tools");
-                SetActiveView("Settings");
+                // 5 Primary Destinations (PRD §5.1) + 1 Secondary Destination (Settings)
                 SetActiveView("Overview");
-                var navDestinationsVerified = viewModel.CurrentDestination == "Overview" && OverviewPanel.Visibility == Visibility.Visible;
+                var primaryNavOverviewVerified = viewModel.CurrentDestination == "Overview" && OverviewPanel.Visibility == Visibility.Visible && LiveTrafficViewControl.Visibility == Visibility.Collapsed && AppsViewControl.Visibility == Visibility.Collapsed && HistoryViewControl.Visibility == Visibility.Collapsed && NetworkToolsViewControl.Visibility == Visibility.Collapsed;
+
+                SetActiveView("LiveTraffic");
+                var primaryNavLiveTrafficVerified = viewModel.CurrentDestination == "LiveTraffic" && LiveTrafficViewControl.Visibility == Visibility.Visible && OverviewPanel.Visibility == Visibility.Collapsed;
+
+                SetActiveView("Apps");
+                var primaryNavAppsVerified = viewModel.CurrentDestination == "Apps" && AppsViewControl.Visibility == Visibility.Visible && OverviewPanel.Visibility == Visibility.Collapsed;
+
+                SetActiveView("History");
+                var primaryNavHistoryVerified = viewModel.CurrentDestination == "History" && HistoryViewControl.Visibility == Visibility.Visible && OverviewPanel.Visibility == Visibility.Collapsed;
+
+                SetActiveView("Tools");
+                var primaryNavToolsVerified = viewModel.CurrentDestination == "Tools" && NetworkToolsViewControl.Visibility == Visibility.Visible && OverviewPanel.Visibility == Visibility.Collapsed;
+
+                SetActiveView("Settings");
+                var secondaryNavSettingsVerified = viewModel.CurrentDestination == "Settings" && SettingsViewControl.Visibility == Visibility.Visible && OverviewPanel.Visibility == Visibility.Collapsed;
+
+                SetActiveView("Overview");
+                var navDestinationsVerified = primaryNavOverviewVerified && primaryNavLiveTrafficVerified && primaryNavAppsVerified && primaryNavHistoryVerified && primaryNavToolsVerified && secondaryNavSettingsVerified && viewModel.CurrentDestination == "Overview" && OverviewPanel.Visibility == Visibility.Visible;
+
+                // Storage degradation banner semantics verification (Healthy => collapsed; Degraded => visible)
+                StorageDegradedBanner.Visibility = Visibility.Collapsed;
+                var storageHealthyBannerCollapsed = StorageDegradedBanner.Visibility == Visibility.Collapsed;
 
                 StorageDegradedBanner.Visibility = Visibility.Visible;
                 StorageDegradedText.Text = "Storage Degraded: Disk capacity limit reached (smoke test).";
-                var storageBannerTruthful = StorageDegradedBanner.Visibility == Visibility.Visible && StorageDegradedText.Text.Contains("Storage Degraded");
+                var storageDegradedBannerTruthful = StorageDegradedBanner.Visibility == Visibility.Visible && StorageDegradedText.Text.Contains("Storage Degraded");
                 StorageDegradedBanner.Visibility = Visibility.Collapsed;
+                var storageBannerTruthful = storageHealthyBannerCollapsed && storageDegradedBannerTruthful;
 
                 monitor.Reset();
                 await Task.Delay(250);
@@ -259,6 +278,12 @@ public partial class MainWindow : Window
                     ClickThroughBeforeShow = clickThroughBeforeShow, ClickThroughRecoveredViaTray = clickThroughRecoveredViaTray,
                     WidgetPausedTruthful = widgetPausedTruthful, WidgetStatesTruthful = widgetStatesTruthful,
                     QuickPanelSmokePass = quickPanelSmokePass,
+                    PrimaryNavOverviewVerified = primaryNavOverviewVerified,
+                    PrimaryNavLiveTrafficVerified = primaryNavLiveTrafficVerified,
+                    PrimaryNavAppsVerified = primaryNavAppsVerified,
+                    PrimaryNavHistoryVerified = primaryNavHistoryVerified,
+                    PrimaryNavToolsVerified = primaryNavToolsVerified,
+                    SecondaryNavSettingsVerified = secondaryNavSettingsVerified,
                     NavDestinationsVerified = navDestinationsVerified,
                     StorageBannerTruthful = storageBannerTruthful,
                     WindowWidth = ActualWidth, WindowHeight = ActualHeight
@@ -318,9 +343,9 @@ public partial class MainWindow : Window
 
         if (StorageDegradedBanner is not null)
         {
-            var isDegraded = snapshot.State == CollectorState.Degraded;
-            StorageDegradedBanner.Visibility = isDegraded ? Visibility.Visible : Visibility.Collapsed;
-            if (isDegraded && StorageDegradedText is not null)
+            var isStorageDegraded = snapshot.StorageHealth == StorageHealth.Degraded;
+            StorageDegradedBanner.Visibility = isStorageDegraded ? Visibility.Visible : Visibility.Collapsed;
+            if (isStorageDegraded && StorageDegradedText is not null)
             {
                 StorageDegradedText.Text = !string.IsNullOrWhiteSpace(snapshot.DegradedReason)
                     ? $"Storage Degraded: {snapshot.DegradedReason}"
@@ -344,10 +369,14 @@ public partial class MainWindow : Window
         StatusText.Text = last.State switch
         {
             ReadingState.Measuring => "Measuring… establishing baseline.",
-            ReadingState.Live => $"Active · Scope: {displayed?.ScopeDecision?.Summary ?? "Selected adapter"}",
+            ReadingState.Live => displayed?.State == CollectorState.Degraded && displayed?.StorageHealth == StorageHealth.Healthy
+                ? $"Measurement degraded · {displayed?.Observation.Detail ?? "Provider reporting degraded availability"}"
+                : $"Active · Scope: {displayed?.ScopeDecision?.Summary ?? "Selected adapter"}",
             ReadingState.Paused => "Collection paused by user.",
             ReadingState.Discontinuity => "Counter discontinuity detected. Rebaselined cleanly.",
-            _ => last.Detail
+            _ => displayed?.Observation.Availability != ProviderAvailability.Available
+                ? $"Measurement unavailable · {displayed?.Observation.Detail ?? last.Detail}"
+                : last.Detail
         };
 
         CoverageText.Text = $"Epoch: {last.MeasurementEpoch} · Monotonic: {last.MonotonicSeconds:F1}s";
