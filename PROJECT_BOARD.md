@@ -1,28 +1,37 @@
 # Current milestone
 
-**V1.0 Wave 4 complete; Gate D formally passed.** All Wave 4 everyday capabilities implemented: connectivity state with 3 independent axes, user-enabled optional reachability checks with typed endpoint registry (single Microsoft NCSI HTTPS endpoint), network details with truthful interface link speed, native Windows WLAN API (wlanapi.dll) Wi-Fi metadata correlation by adapter GUID and connected BSSID matching (explicit 6-byte MAC comparison without list ordering assumptions or frequency borrowing), frequency-based band detection, NLM COM profile name discovery, ping benchmark (10 attempts PRD default), DNS resolution, privacy-guarded manual public IP lookup, V1 alert engine with deduplication ledger and quiet hours, transparent first-run onboarding, full theme support (Dark/Light/System), widget layouts (Minimal/Compact Graph/Detailed) with idle dimming and fullscreen auto-hide, single instance User SID mutex and canonical file lock coordination with clean exit code 0, low-resource UI refresh throttling, Windows startup toggle, global hotkeys, data retention pruning, authentic SQLite schema V2->V3 migration preservation, and atomic configuration export/import. Baseline verification: 233 passed, 1 intentional skip, 0 failed (`check.ps1`); Windows checks: 241 passed, 1 skip, 0 failed (`check.ps1 -Windows`); WPF smoke 18/18 native assertions True. Ready for Wave 5 (Release Engineering). Updated 12 October 2026 (Asia/Dhaka).
+**V1.0 Wave 5 complete; Gate E1 passed; Gate E2 GA pending field validation.** All Wave 5 Release Engineering requirements implemented:
+- Pinned self-contained `win-x64` primary distribution (`SpeedMeterPro-1.0.0-rc.1-win-x64.zip`, ~71.81 MB compressed, 174.18 MB uncompressed) and secondary framework-dependent distribution (`SpeedMeterPro-1.0.0-rc.1-win-x64-fdd.zip`, 1.60 MB compressed) authored per ADR-012 and ADR-013.
+- Zero-UAC standard user installation into `%LocalAppData%\Programs\SpeedMeterPro` via `Install.ps1`, Start Menu integration, and clean uninstaller (`Uninstall.ps1`) with user data retention vs complete purge (`-PurgeUserData`).
+- Multi-stage update trust pipeline (ADR-014) with RSA-SHA256 manifest signature validation, package SHA-256 verification, Authenticode binary signature enforcement, quarantine staging, and downgrade rejection.
+- Durability and disaster recovery: Pre-migration SQLite snapshot creation and rollback recovery drill with 100% data fidelity.
+- Bounded operational logger (`OperationalLogger`) with 5 MB ceiling, 7-day retention, and automatic redaction of IPv4 addresses, MAC addresses, and user paths; sanitized diagnostic support bundle export (`DiagnosticBundleService`) with live redaction preview.
+- Authenticode signing (`scripts/sign.ps1`), SPDX 2.3 SBOM (`artifacts/release/sbom.spdx.json`), and Third-Party Notices (`THIRD-PARTY-NOTICES.md`).
+- Master release candidate orchestrator (`scripts/release.ps1`) generating verified checksums (`RELEASE-HASHES.sha256`) and executing package extraction verification drills.
+- Authoritative documentation: `docs/COMPATIBILITY.md`, `docs/PRIVACY.md`, `docs/HELP.md`, `docs/KNOWN-ISSUES.md`, `docs/RELEASE-NOTES-v1.0.0.md`, and `docs/evidence/RELEASE-EVIDENCE-v1.0.0-rc.1.md`.
+- Baseline verification: 243 passed, 1 intentional skip, 0 failed (`check.ps1`); Windows checks: 251 passed, 1 skip, 0 failed (`check.ps1 -Windows`); WPF smoke: 18/18 native assertions True. Gate E1 passed; Gate E2 GA blocked awaiting physical field validation. Updated 12 October 2026 (Asia/Dhaka).
 
 # In progress
 
-None. Wave 4 completed; Gate D closed.
+None. Wave 5 completed; Gate E1 closed.
 
-# Ready (Next Wave: Wave 5 / Release Engineering)
+# Ready (Next Wave: Field Validation & V1.5 Engineering)
 
 | Task | Owner | Reviewer | Dependency | Acceptance |
 |---|---|---|---|---|
-| V1-REL-001 | Release Engineer | Architect + Director | Gate D passed | MSIX / InnoSetup packaging, code signing configuration, update check mechanism, and release documentation |
-| V1-REL-002 | Platform / QA Engineer | QA + Director | Gate D passed | Windows 11 target validation matrix (26H2, 25H2, 26H1, 24H2) and live hardware power transition verification |
-| V1-REL-003 | Reliability Engineer | Architect + Director | Gate D passed | 24-hour continuous workload and 7-day soak stability verification |
-| V1.5-PLAN-001 | Project Director | Software Architect + Product | Release engineering | Author V1.5 Master Execution Plan covering least-privilege ETW network attribution research and advanced quality tooling |
+| V1-GA-001 | Field / Reliability Engineer | QA + Director | Gate E1 passed | 7-day soak stability verification and 24-hour mixed network workload run on physical hardware |
+| V1-GA-002 | Platform / QA Engineer | QA + Director | Gate E1 passed | Windows 11 target validation matrix (26H2, 25H2, 26H1, 24H2) live hardware power transition verification |
+| V1.5-PLAN-001 | Project Director | Software Architect + Product | Release candidate | Author V1.5 Master Execution Plan covering least-privilege ETW network attribution research and advanced quality tooling |
 
 # Review
 
-None. Architect, Privacy, and QA review completed; Director approved Gate D.
+None. Architect, Security, and QA review completed; Director approved Gate E1.
 
 # Done
 
 | Task | Owner | Reviewer | Completion Evidence |
 |---|---|---|---|
+| V1-W5-GATE-E1 | Release Engineer / Office | Architect, QA, Director | V1 Wave 5 full release engineering closure: Canonical version model (1.0.0-rc.1), self-contained win-x64 packaging, zero-elevation per-user installer/uninstaller scripts, Authenticode signing pipeline, update trust verification with quarantine and downgrade protection, SQLite pre-migration snapshotting & rollback drill, bounded sanitized operational logging, diagnostic bundle export with live redaction preview, SPDX 2.3 SBOM, third-party notices, release notes, compatibility matrix, and authoritative release hashes. 243 PASS / 1 SKIP / 0 FAIL (`check.ps1`); 251 PASS / 1 SKIP / 0 FAIL (`check.ps1 -Windows`); 18/18 WPF smoke assertions True (`smoke.ps1`). `GATE E1: V1 RELEASE PACKAGE VERIFIED — RC FIELD VALIDATION AUTHORIZED`. Gate E2 GA blocked pending physical soak. |
 | V1-W4-GATE-D | Project Director / Office | Architect, QA, Privacy | V1 Wave 4 full capability closure: Connectivity 3-axis engine, bounded reachability probes, truthful network details, Native WLAN API P/Invoke metadata correlation by adapter GUID and connected BSSID matching (6-byte MAC comparison without list ordering assumptions or frequency borrowing), NLM COM profile name discovery, ping (10 attempts PRD default) & DNS tools, public IP lookup with disclosure, V1 alerts with deduplication, first-run privacy onboarding, light/dark/system themes, multi-layout widget, single-instance User SID mutex & file lock activation with clean exit code 0, low-resource UI throttling, startup/hotkeys, history pruning, authentic V2->V3 SQLite migration fidelity, and atomic config export/import. 233 PASS, 1 SKIP, 0 FAIL (`check.ps1`); 241 PASS, 1 SKIP, 0 FAIL (`check.ps1 -Windows`); 18/18 WPF smoke assertions True. `GATE D INDEPENDENTLY VERIFIED — WAVE 5 RELEASE ENGINEERING AUTHORIZED`. |
 | V1-CLOCK-CODE-001 | Project Director + Network Measurement + QA | Architect + QA | Monotonic lifecycle gap duration, zero-width UTC discontinuity marker, new clock segments, inferred sleep fallback, history uncertainty, and structured shutdown result integrated. Release build 0 warnings/errors; 197 passed, 1 intentionally skipped, 0 failed; WPF smoke 18/18. Code integration accepted; product authority decision accepted ADR-011 safeguards. |
 | V1-TRUTH-001 | Independent Audit Director | Software Architect + QA | Historical closure of scope UI and history error UX (183 passed, 1 skipped; pre-change smoke 18/18). |

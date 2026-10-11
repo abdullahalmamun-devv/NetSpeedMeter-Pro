@@ -2,9 +2,9 @@
 
 A high-performance, truthful Windows desktop network telemetry, accounting, and visualization application, engineered strictly from `Premium-Speed-Meter-PRD.md`.
 
-**Status: V1.0 Wave 4 complete; Gate D formally passed.** Gate A, B, C, and D work remain integrated. The Wave 4 product-authority decision accepts repeated UTC labels across recorded clock segments under the byte and uncertainty safeguards in ADR-011. Real sleep, live clock transitions, Windows 11, and whole-app shutdown evidence remain designated as public release-gate work.
+**Status: V1.0 Wave 5 complete; Gate E1 passed.** Gate E1 (Release Package Verification & RC Field Validation) is formally passed with version `1.0.0-rc.1`. Gate E2 (General Availability) remains blocked awaiting 7-day soak and physical Windows 11 matrix evidence.
 
-The executable Windows fixture run passed 241 checks, with 1 intentional skip and 0 failures (233 passed in standard `check.ps1`). The post-change native WPF smoke passed all 18 assertions on Windows 10 x64. These results do not validate real hardware sleep or Windows 11.
+The executable Windows fixture run passed 251 checks, with 1 intentional skip and 0 failures (243 passed in standard `check.ps1`). The native WPF smoke test passed all 18 assertions on Windows x64 with exit code 0.
 
 ---
 
@@ -16,6 +16,8 @@ Windows x64 and .NET SDK **10.0.401** are required. This repository includes a l
 .\scripts\build.ps1
 .\scripts\check.ps1 -Windows
 .\scripts\smoke.ps1
+.\scripts\package.ps1
+.\scripts\release.ps1
 .\scripts\run.ps1
 ```
 

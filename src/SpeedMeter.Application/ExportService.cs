@@ -31,7 +31,7 @@ public interface IExportService
 public sealed class ExportService : IExportService
 {
     private const string CurrentSchemaVersion = "1.0";
-    private const string CurrentAppVersion = "0.1.0";
+    private static readonly string CurrentAppVersion = ProductIdentity.ProductVersion;
 
     private readonly IUsageHistoryService historyService;
 

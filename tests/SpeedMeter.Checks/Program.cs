@@ -140,6 +140,7 @@ SpeedMeter.Checks.ConnectivityFixtures.Run(Check);
 SpeedMeter.Checks.AlertFixtures.Run(Check);
 SpeedMeter.Checks.NetworkToolsFixtures.Run(Check);
 SpeedMeter.Checks.ConfigExportImportFixtures.RunAll();
+SpeedMeter.Checks.V1Wave5ReleaseFixtures.Run(Check);
 
 if (args.Contains("--windows"))
 {
