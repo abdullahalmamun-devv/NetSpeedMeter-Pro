@@ -1,0 +1,123 @@
+<UserControl x:Class="SpeedMeter.App.Views.OverviewView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:local="clr-namespace:SpeedMeter.App"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="28,24,28,24">
+
+            <!-- Page Header -->
+            <DockPanel Margin="0,0,0,20">
+                <StackPanel>
+                    <TextBlock Text="Overview" FontSize="{StaticResource FontSizeHero}" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" />
+                    <TextBlock Text="Real-time network throughput and today's verified usage" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeBodySmall}" Margin="0,4,0,0" />
+                </StackPanel>
+            </DockPanel>
+
+            <!-- Scope & Status Bar -->
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="16,12" Margin="0,0,0,18">
+                <DockPanel>
+                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                        <TextBlock Text="Collector: " Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeCaption}" />
+                        <TextBlock Text="{Binding CollectorStateText}" FontWeight="SemiBold" FontSize="{StaticResource FontSizeCaption}" Margin="0,0,16,0" />
+                        <Border Background="{StaticResource StatusSuccessBrush}" CornerRadius="3" Padding="6,2" Visibility="{Binding IsDegraded, Converter={x:Null}}">
+                            <TextBlock Text="NORMAL" FontSize="10" FontWeight="Bold" Foreground="#FFFFFF" />
+                        </Border>
+                    </StackPanel>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="MEASUREMENT SCOPE" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,2" />
+                        <TextBlock Text="{Binding ScopeText}" FontWeight="SemiBold" FontSize="{StaticResource FontSizeBody}" Foreground="{StaticResource TextPrimaryBrush}" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <!-- Primary Metric Cards (Download, Upload, Today, Quota) -->
+            <Grid Margin="0,0,0,18">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="14" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Download Card -->
+                <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="20">
+                    <StackPanel>
+                        <DockPanel>
+                            <TextBlock Text="↓ DOWNLOAD" Foreground="{StaticResource DownloadBrush}" FontSize="{StaticResource FontSizeCaption}" FontWeight="Bold" />
+                            <TextBlock Text="Real-time" HorizontalAlignment="Right" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeCaption}" />
+                        </DockPanel>
+                        <TextBlock Text="{Binding DownloadRateText}" FontSize="36" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,10,0,6" />
+                        <TextBlock Text="{Binding SessionRxText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeBodySmall}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Upload Card -->
+                <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="20">
+                    <StackPanel>
+                        <DockPanel>
+                            <TextBlock Text="↑ UPLOAD" Foreground="{StaticResource UploadBrush}" FontSize="{StaticResource FontSizeCaption}" FontWeight="Bold" />
+                            <TextBlock Text="Real-time" HorizontalAlignment="Right" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeCaption}" />
+                        </DockPanel>
+                        <TextBlock Text="{Binding UploadRateText}" FontSize="36" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,10,0,6" />
+                        <TextBlock Text="{Binding SessionTxText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeBodySmall}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Today & Quota Cards Grid -->
+            <Grid Margin="0,0,0,18">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="14" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Today Usage Card -->
+                <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="18">
+                    <StackPanel>
+                        <DockPanel>
+                            <TextBlock Text="TODAY'S RECORDED USAGE" FontSize="11" FontWeight="Bold" Foreground="{StaticResource TextSecondaryBrush}" />
+                            <TextBlock Text="{Binding TodayCoverageText}" HorizontalAlignment="Right" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" />
+                        </DockPanel>
+                        <TextBlock Text="{Binding TodayTotalText}" FontSize="24" FontWeight="SemiBold" Margin="0,10,0,6" />
+                        <DockPanel>
+                            <TextBlock Text="Download: " Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeBodySmall}" />
+                            <TextBlock Text="{Binding TodayRxText}" Foreground="{StaticResource DownloadBrush}" FontSize="{StaticResource FontSizeBodySmall}" FontWeight="SemiBold" Margin="0,0,12,0" />
+                            <TextBlock Text="Upload: " Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeBodySmall}" />
+                            <TextBlock Text="{Binding TodayTxText}" Foreground="{StaticResource UploadBrush}" FontSize="{StaticResource FontSizeBodySmall}" FontWeight="SemiBold" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Quota Card -->
+                <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="18">
+                    <StackPanel>
+                        <DockPanel>
+                            <TextBlock Text="BILLING CYCLE QUOTA" FontSize="11" FontWeight="Bold" Foreground="{StaticResource TextSecondaryBrush}" />
+                            <TextBlock Text="{Binding QuotaBadgeText}" HorizontalAlignment="Right" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AccentBrush}" />
+                        </DockPanel>
+                        <TextBlock Text="{Binding QuotaSummaryText}" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,8" />
+                        <ProgressBar Value="{Binding QuotaPercent}" Maximum="100" Margin="0,0,0,8" />
+                        <TextBlock Text="{Binding QuotaRemainingText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeBodySmall}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Live Chart Card -->
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="20" Margin="0,0,0,18">
+                <StackPanel>
+                    <DockPanel>
+                        <TextBlock Text="Live Traffic (Last 60 Seconds)" FontWeight="SemiBold" FontSize="{StaticResource FontSizeSubheading}" />
+                        <TextBlock Text="↓ Download (Blue)   ·   ↑ Upload (Teal dashed)" HorizontalAlignment="Right" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeCaption}" />
+                    </DockPanel>
+                    <local:TrafficChart x:Name="Chart" Height="150" Margin="0,16,0,10"
+                                        AutomationProperties.Name="Live traffic graph for last 60 seconds." />
+                    <TextBlock Text="Gaps indicate pauses, sleep spans or disconnected network intervals without fabricated continuity." Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

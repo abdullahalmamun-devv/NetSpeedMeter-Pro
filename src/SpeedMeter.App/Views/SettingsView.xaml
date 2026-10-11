@@ -1,0 +1,137 @@
+<UserControl x:Class="SpeedMeter.App.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="28,24,28,24">
+
+            <!-- Page Header -->
+            <DockPanel Margin="0,0,0,20">
+                <StackPanel>
+                    <TextBlock Text="Settings" FontSize="{StaticResource FontSizeHero}" FontWeight="SemiBold" />
+                    <TextBlock Text="Application preferences, sampling parameters and display configuration" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeBodySmall}" Margin="0,4,0,0" />
+                </StackPanel>
+            </DockPanel>
+
+            <!-- General & Appearance Card -->
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="22" Margin="0,0,0,18">
+                <StackPanel>
+                    <TextBlock Text="Appearance &amp; Units" FontSize="{StaticResource FontSizeSubheading}" FontWeight="SemiBold" Margin="0,0,0,16" />
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Color Theme:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <ComboBox Grid.Column="1" SelectedValue="{Binding Theme}" SelectedValuePath="Tag" Width="200" HorizontalAlignment="Left">
+                            <ComboBoxItem Content="Dark (Default)" Tag="Dark" />
+                            <ComboBoxItem Content="Light" Tag="Light" />
+                            <ComboBoxItem Content="System" Tag="System" />
+                            <ComboBoxItem Content="High Contrast" Tag="HighContrast" />
+                        </ComboBox>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Rate Unit System:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <CheckBox Grid.Column="1" Content="Display rates in decimal bits/second (Mbps) instead of bytes/second (MB/s)" IsChecked="{Binding Bits}" VerticalAlignment="Center" Foreground="{StaticResource TextPrimaryBrush}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Monitoring & Sampling Card -->
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="22" Margin="0,0,0,18">
+                <StackPanel>
+                    <TextBlock Text="Monitoring &amp; Timezone" FontSize="{StaticResource FontSizeSubheading}" FontWeight="SemiBold" Margin="0,0,0,16" />
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Sampling Interval:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <ComboBox Grid.Column="1" SelectedValue="{Binding Interval}" SelectedValuePath="Tag" Width="200" HorizontalAlignment="Left">
+                            <ComboBoxItem Content="0.5 seconds (High precision)" Tag="0.5" />
+                            <ComboBoxItem Content="1.0 second (Standard default)" Tag="1.0" />
+                            <ComboBoxItem Content="2.0 seconds (Low resource)" Tag="2.0" />
+                        </ComboBox>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Reporting Timezone:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding AvailableTimezones}" SelectedItem="{Binding SelectedTimezoneId}" Width="320" HorizontalAlignment="Left" />
+                    </Grid>
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Billing Cycle Start Day:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBox Grid.Column="1" Text="{Binding BillingCycleDay, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Left" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Widget Settings Card -->
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="22" Margin="0,0,0,18">
+                <StackPanel>
+                    <TextBlock Text="Floating Widget Options" FontSize="{StaticResource FontSizeSubheading}" FontWeight="SemiBold" Margin="0,0,0,16" />
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Layout Style:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <ComboBox Grid.Column="1" SelectedValue="{Binding WidgetLayout}" SelectedValuePath="Tag" Width="200" HorizontalAlignment="Left">
+                            <ComboBoxItem Content="Minimal (Rates only)" Tag="Minimal" />
+                            <ComboBoxItem Content="Compact Graph" Tag="CompactGraph" />
+                            <ComboBoxItem Content="Detailed" Tag="Detailed" />
+                        </ComboBox>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Widget Opacity:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <DockPanel Grid.Column="1" MaxWidth="300" HorizontalAlignment="Left">
+                            <TextBlock Text="{Binding WidgetOpacity, StringFormat='{}{0:P0}'}" Width="45" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" DockPanel.Dock="Right" />
+                            <Slider Minimum="0.2" Maximum="1.0" Value="{Binding WidgetOpacity}" TickFrequency="0.1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Margin="0,0,10,0" Width="180" />
+                        </DockPanel>
+                    </Grid>
+
+                    <StackPanel Margin="0,0,0,8">
+                        <CheckBox Content="Always on Top (Topmost)" IsChecked="{Binding WidgetTopmost}" Margin="0,0,0,8" Foreground="{StaticResource TextPrimaryBrush}" />
+                        <CheckBox Content="Enable Click-through (Clicks pass through; recoverable via tray icon)" IsChecked="{Binding WidgetClickThrough}" Margin="0,0,0,8" Foreground="{StaticResource TextPrimaryBrush}" />
+                        <CheckBox Content="Auto-hide in fullscreen mode" IsChecked="{Binding WidgetFullscreenAutoHide}" Foreground="{StaticResource TextPrimaryBrush}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Action Buttons -->
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="16,12">
+                <DockPanel>
+                    <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource StatusSuccessBrush}" VerticalAlignment="Center" FontSize="12" Margin="16,0,0,0" DockPanel.Dock="Right" />
+                    <WrapPanel VerticalAlignment="Center">
+                        <Button Content="Save Settings" Command="{Binding SaveCommand}" Width="120" />
+                        <Button Content="Reset to Defaults" Command="{Binding ResetDefaultsCommand}" Width="140" />
+                    </WrapPanel>
+                </DockPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

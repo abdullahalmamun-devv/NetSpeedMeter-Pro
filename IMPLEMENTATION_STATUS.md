@@ -1,13 +1,13 @@
 # Implementation status
 
 **Current release:** 0.1.0 development prototype; no GA release.  
-**Current milestone:** V1.0 Production Engineering — INDEPENDENT GATE B FORENSIC AUDIT COMPLETE · GATE B VERIFIED AFTER REPAIRS · WAVE 3 AUTHORIZED.  
+**Current milestone:** V1.0 Production Engineering — WAVE 3 COMPLETE · PRODUCT SURFACE INTEGRATED · GATE C AUDIT AUTHORIZED.  
 **Updated:** 11 October 2026 (Asia/Dhaka).
 
 ## Build / test status
 
 - **Build:** Succeeded with 0 warnings, 0 errors across 6 projects (`Core`, `Windows`, `Storage`, `Application`, `App`, `Checks`) using .NET 10 SDK 10.0.401.
-- **Fixtures:** 148 passed, 1 skipped (explicit `SkipCheckException` test), 0 failed via `scripts/check.ps1 -Windows`:
+- **Fixtures:** 159 passed, 1 skipped (explicit `SkipCheckException` test), 0 failed via `scripts/check.ps1 -Windows`:
   - 14 baseline arithmetic and boundary checks
   - 21 epoch, large counter, and delta discontinuity fixtures (including mandatory 125 MB / 10s = 12.5 MB/s and 100 Mbps)
   - 7 application collector lifecycle and resilience fixtures
@@ -18,50 +18,29 @@
   - 10 Windows audit regression fixtures in `WindowsAuditFixtures.cs` (WS-01/02/03/07/10 fail-closed scope rules, duplicate identity rejection, and immutable membership)
   - 10 V1 Foundation Wave 1 fixtures in `V1FoundationFixtures.cs` (AutoPrimary, ScopeStabilizer, BLOB codecs, checked math, rollup uniqueness, crash gaps, degradation resilience)
   - 10 V1 Foundation Gate A forensic audit fixtures in `V1FoundationFixtures.cs` (zero overlap crash gaps, child process restart, FailFast recovery, degraded storage snapshot, queue saturation)
-  - 28 V1 Wave 2 & Gate B audit fixtures in `V1Wave2Fixtures.cs`:
-    - `W2-SPLIT`: IntegerSplitter partition conservation property across arbitrary boundaries ($\sum \text{allocated} \equiv \text{original}$)
-    - `W2-SPLIT`: IntegerSplitter exact remainder allocation and boundary matching
-    - `W2-SPLIT`: IntegerSplitter Int128 arithmetic eliminates 64-bit multiplication overflow
-    - `W2-SPLIT`: IntegerSplitter seeded randomized property testing across 10,000 cases (remedies DEF-B05/conservation)
-    - `W2-CALENDAR`: CalendarRangeResolver Today Yesterday Week Month boundaries
-    - `W2-CALENDAR`: Billing cycle day 31 clamps in February without mutating requested cycle day
-    - `W2-CALENDAR`: Billing cycle February leap year (29) vs common year (28) clamping
-    - `W2-CALENDAR`: DST spring forward (23h) and fall back (25h) local day boundary resolution
-    - `W2-CALENDAR`: Fixed-offset non-DST timezone (Asia/Dhaka) sanity resolution
-    - `W2-CALENDAR`: Dynamic non-one-hour DST resolution (Lord Howe Island 30m delta, remedies DEF-B01)
-    - `W2-CALENDAR`: Missing environment timezone reports explicit SKIP instead of false pass (remedies DEF-B09)
-    - `W2-HIST`: No double counting across adjacent half-open ranges (A + B == C)
-    - `W2-HIST`: Strict boundary inequality excludes boundary-touching intervals (remedies DEF-B06)
-    - `W2-HIST`: GetTotalBytesAsync allocates partial ranges using IntegerSplitter (remedies DEF-B05)
-    - `W2-HIST`: Coverage denominator truthfully reflects unexplained missing spans (remedies DEF-B07)
-    - `W2-HIST`: Temporal overlap between consecutive intervals flags StorageDegraded (remedies DEF-B07)
-    - `W2-HIST`: History availability boundary distinguishes unrecorded history from missing gaps
-    - `W2-HIST`: Keyset cursor pagination over intervals provides stable deterministic traversal
-    - `W2-HIST`: Daily rollup generation preserves distinct scope and network dimensions (remedies DEF-B08)
-    - `W2-QUOTA`: QuotaEvaluator calculates remaining bytes and overage beyond 100% accurately
-    - `W2-QUOTA`: Disabled quota rule truthfully preserves recorded bytes without zeroing (remedies DEF-B03)
-    - `W2-QUOTA`: Basis points validation, PRD defaults, and canonical billing cycle identity (remedies DEF-B04/B13)
-    - `W2-QUOTA`: Opening balance improves effective quota calculation without inflating coverage
-    - `W2-QUOTA`: Warning threshold crossing emits in deterministic order and handles threshold jumping
-    - `W2-QUOTA`: Quota threshold deduplication persists in SQLite and survives storage restart
-    - `W2-GRAPH`: LiveGraphBuffer memory is strictly bounded and downsampling preserves peak spikes
-    - `W2-GRAPH`: LiveGraphBuffer rejects out-of-order points and resolves duplicate timestamps (remedies DEF-B12)
-    - `W2-SETTINGS`: SettingsStorage persists atomically with versioned schema and sanitization
-    - `W2-SETTINGS`: SettingsStorage rejects future schema version without modifying file (remedies DEF-B02)
-    - `W2-SETTINGS`: SettingsStorage persists monitor identity and work area anchors (remedies DEF-B11)
-    - `W2-SETTINGS`: SettingsStorage corrupt file recovery creates backup and loads safe defaults
-    - `W2-SERVICES`: Application services (History, Quota, Settings, Graph) end-to-end integration (remedies DEF-B10)
-    - `W2-CONCURRENCY`: Active background Collector persistence runs alongside concurrent queries without stall
+  - 28 V1 Wave 2 & Gate B audit fixtures in `V1Wave2Fixtures.cs` (IntegerSplitter Int128 conservation, calendar/billing cycle day 31 clamping, Lord Howe Island 30m DST, half-open boundaries, coverage denominator, quota basis points deduplication, bounded live graph buffer, atomic settings persistence)
+  - 11 V1 Wave 3 fixtures in `V1Wave3Fixtures.cs`:
+    - `W3-EXPORT`: Keyset-paged CSV export with metadata disclosure and formula injection prevention (`=`, `+`, `-`, `@`, `\t`, `\r` prepended with `'`)
+    - `W3-EXPORT`: JSON export schema validity, explicit nulls, and typed numerics
+    - `W3-EXPORT`: Atomic file export leaves target untouched on failure or cancellation (`.tmp` atomic replacement)
+    - `W3-HIST`: HistoryViewModel query cancellation token CTS prevents stale query race conditions
+    - `W3-QUOTA`: Basis points formatting and bidirectional parsing with PRD defaults
+    - `W3-QUOTA`: Billing cycle preview dates reflect month clamping without mutating requested cycle day
+    - `W3-SETTINGS`: SettingsViewModel atomic persistence and sanitization round-trip
+    - `W3-GRAPH`: Live graph downsampling preserves gap breaks without connecting lines across gaps
+    - `W3-APPCONTEXT`: ApplicationContext end-to-end integration wires Collector to LiveGraph and Storage
+    - `W3-QUICKPANEL`: QuickPanelWindow positioning clamps strictly within work area
+    - `W3-APPS-TRUTHFUL`: Apps page exposes truthful V1.5 gating without simulated processes
   - 3 performance and stability benchmarks (preliminary microbenchmarks)
   - 4 live Windows IP Helper, RouteProvider, and TaskbarCompanion checks
-- **UI Smoke:** Real WPF shell and productionized floating widget smoke test passing via `scripts/smoke.ps1` on Windows build 19045 (`.NET 10.0.12`).
+- **UI Smoke:** Real WPF shell, production navigation, Quick Panel, and floating widget smoke test passing via `scripts/smoke.ps1` on Windows build 19045 (`.NET 10.0.12`) with all 10 native assertions True.
 
 ## Implemented verified paths
 
 - **SpeedMeter.Core:**
   - Strict monotonic timing domain, 64-bit checked integer deltas, atomic RX/TX overflow handling, `CounterEpoch` and `MeasurementEpoch` boundaries, decimal rate and byte formatters (`MetricFormat`).
   - `HistoricalRange`: Readonly struct with canonical half-open `[StartUtcMs, EndUtcMs)` semantics, non-negative duration enforcement, overlap detection, and duration calculation.
-  - `CalendarRangeResolver`: Timezone-aware local boundary resolution for Today, Yesterday, This Week, This Month, and Billing Cycle. Dynamically derives transition deltas from `TimeZoneInfo.GetAdjustmentRules()` (verified on Lord Howe Island 30m delta). Provides `GetDayRange` as single source of truth for calendar days.
+  - `CalendarRangeResolver`: Timezone-aware local boundary resolution for Today, Yesterday, This Week, This Month, and Billing Cycle. Dynamically derives transition deltas from `TimeZoneInfo.GetAdjustmentRules()`.
   - `IntegerSplitter`: Cumulative monotonic mapping $\text{CumulativeBytes}(t) = \lfloor \frac{(\text{Int128})B \times (t - t_{start})}{D} \rfloor$ guaranteeing exact partition conservation ($\sum \text{allocated} \equiv \text{original}$) with 0 remainder loss across 10,000 randomized property tests.
   - `QuotaDomain`: `QuotaRule`, `QuotaDirectionMode`, `QuotaPeriodType`, `QuotaEvaluation`, and `QuotaEvaluator.Evaluate`. Warning thresholds standardized to integer basis points (`int ThresholdBps`, where 8000 = 80.00%, 10000 = 100.00%). PRD §11.2 defaults (`[8000, 9000, 10000]`). Truthful non-zero recorded bytes when disabled. Canonical `BillingCycleIdentity.Create` and `CreateRevision`.
   - `LiveGraphBuffer`: Pre-allocated circular ring buffer with bounded memory. Monotonic timestamp order guards reject out-of-order points and resolve duplicate timestamps by sequence number. Peak-preserving downsampling.
@@ -81,16 +60,22 @@
   - `IQuotaService` / `QuotaService`: Cycle quota evaluation, threshold event recording, and persistent alert deduplication.
   - `ISettingsService` / `SettingsService`: Centralized settings state, atomic disk persistence, and `SettingsChanged` event notifications.
   - `ILiveGraphService` / `LiveGraphService`: In-memory graph sampling and downsampled window snapshots.
+  - `IExportService` / `ExportService`: Keyset-paged CSV export with metadata disclosure header comments and spreadsheet injection neutralization; valid JSON export with schema v1.0 and explicit nulls; atomic `.tmp` replacement.
+  - `ApplicationContext`: Composition root wiring Collector, Storage, History, Quota, Settings, LiveGraph, and Export services.
   - Headless `Collector` with lifecycle states, lock-free consumer notifications, AutoPrimary route selection, and debounced scope transitions.
 - **SpeedMeter.Windows & App:**
+  - Design tokens (`Tokens.xaml`, `ThemeDark.xaml`) with directional download `#3B82F6` and upload `#14B8A6`. Tabular numerals across all metrics.
+  - Complete MVVM presentation architecture: `MainViewModel`, `OverviewViewModel`, `LiveTrafficViewModel`, `HistoryViewModel`, `QuotaViewModel`, `SettingsViewModel`, `QuickPanelViewModel`, `NetworkToolsViewModel`, `AppsViewModel`. Strict presentation boundary: zero direct queries to SQLite or disk JSON from UI.
+  - Modern navigation shell (`MainWindow.xaml`) with 5 primary destinations (Overview, Live Traffic, Apps, History, Network Tools) + Settings/About.
+  - `QuickPanelWindow`: Compact popup window with multi-monitor work-area clamping, Escape auto-dismiss, and pause toggle.
   - Native Win32 `GetIfTable2` adapter enumeration (35 adapters observed).
   - RouteProvider dual-stack egress candidate enumeration.
   - TaskbarCompanion AppBar query and floating widget fallback.
-  - Minimal floating widget with keyboard nudging, lock, opacity, click-through with tray recovery, and WPF shell.
+  - Minimal floating widget with keyboard nudging, lock, opacity, click-through with tray recovery (index 4 invariant intact), and WPF shell.
 
 ## Validated on real Windows
 
 - **Host Environment:** Microsoft Windows 10 Pro x64 (build 10.0.19045.0), 4 logical processors, .NET 10.0.12 runtime. Developer evidence only; not a release port authorization.
 - **Observed:**
-  - 148 passed checks, 1 skipped check, 0 failed checks. Exit code: 0.
-  - UI smoke test passed with all state invariants verified. Exit code: 0.
+  - 159 passed checks, 1 skipped check, 0 failed checks. Exit code: 0.
+  - UI smoke test passed with all 10 native assertions verified (`True`). Exit code: 0. Window geometry: 1160x780. Click-through tray recovery item index 4 verified.

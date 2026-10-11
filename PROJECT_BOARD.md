@@ -1,18 +1,16 @@
 # Current milestone
 
-**V1.0 Production Engineering — INDEPENDENT GATE B FORENSIC AUDIT COMPLETE · GATE B VERIFIED AFTER REPAIRS · WAVE 3 AUTHORIZED.** Independent forensic audit of Wave 2 history, timezone, billing, quota, rollups, live graph, and settings completed. 148 automated checks passing, 1 check explicitly skipped (SkipCheckException demonstration), 0 failed. UI smoke test passing with exit code 0. 13 defects remediated (DEF-B01 through DEF-B13) including dynamic non-1-hour DST resolution (Lord Howe Island 30m delta), future settings schema rejection without overwrite, truthful non-zero recorded bytes when quota alerts are disabled, integer basis points quota deduplication ledger (`threshold_bps INTEGER NOT NULL`), range-aware `GetTotalBytesAsync`, strict half-open boundary inequalities in `GetIntervalsAsync`, truthful coverage denominator accounting for unexplained missing spans, dimension-preserving daily rollups, monitor identity persistence, monotonic live graph ring buffer guards, and 4 high-level Application service facades (`IUsageHistoryService`, `IQuotaService`, `ISettingsService`, `ILiveGraphService`). Audit Director: lead agent. Updated 11 October 2026 (Asia/Dhaka).
+**V1.0 Production Engineering — WAVE 3 COMPLETE · PRODUCT SURFACE INTEGRATED · GATE C AUDIT AUTHORIZED.** Full user-facing product surface and export foundation implemented on top of verified domain and application facade layers. 159 automated checks passing, 1 check explicitly skipped (SkipCheckException demonstration), 0 failed. Real Windows UI smoke test passing with exit code 0 and all 10 native assertions True. Full MVVM presentation architecture (Overview, Live Traffic, History, Quota, Settings, Network Tools, Apps truthful gating, Quick Panel, Tray context menu, and Export Service) strictly isolated from raw SQLite and disk storage. Project Director: lead agent. Updated 11 October 2026 (Asia/Dhaka).
 
 # In progress
 
-None. V1 Gate B forensic audit and repairs are complete. V1 Wave 3 implementation authorized to begin.
+None. V1 Wave 3 implementation complete. Independent V1 Gate C forensic audit authorized to begin.
 
-# Ready (Next Wave: V1.0 Wave 3 — Product Surface & Desktop Presentation)
+# Ready (Next Wave: Independent V1 Gate C Forensic Audit)
 
 | Task | Owner | Reviewer | Dependency | Acceptance |
 |---|---|---|---|---|
-| V1-DASH-001 | Desktop UI / UX | Accessibility + Product | V1-USAGE-001, V1-QUOTA-001, V1-LIVEGRAPH-001 | Main dashboard historical view, range selector (Today/Yesterday/Week/Month/Cycle/Custom), quota cards, and settings dialog bound to Application services |
-| V1-TRAY-001 | Windows Platform / UI | Architect + QA | P0-TASKBAR-001, V1-SETTINGS-001 | Taskbar-adjacent companion window docking, edge alignment, and multi-monitor DPI |
-| V1-EXPORT-001 | Storage / Data Engineer | Product + QA | V1-USAGE-001 | Keyset-paged CSV and JSON export contracts with metadata disclosure |
+| V1-AUDIT-003 | Independent Audit Director | Software Architect + QA | V1-DASH-001, V1-TRAY-001, V1-EXPORT-001 | Independent Gate C forensic audit of complete product surface, MVVM isolation, export safety, accessibility, and presentation invariants |
 
 # Review
 
@@ -22,6 +20,9 @@ None currently.
 
 | Task | Owner | Reviewer | Completion Evidence |
 |---|---|---|---|
+| V1-DASH-001 | Desktop UI / UX | Accessibility + Product | Complete 5-destination navigation shell (`OverviewView`, `LiveTrafficView`, `AppsView`, `HistoryView`, `NetworkToolsView`, `SettingsView`), MVVM ViewModels, design tokens (`Tokens.xaml`, `ThemeDark.xaml`), tabular numerals, query cancellation token CTS in `HistoryViewModel`, basis points threshold formatting/parsing in `QuotaViewModel`, live graph windowing in `LiveTrafficViewModel`. Verified by fixtures and smoke test. |
+| V1-TRAY-001 | Windows Platform / UI | Architect + QA | `QuickPanelWindow` with multi-monitor work-area clamping, auto-dismiss on deactivate/Escape, Tray menu preserved with index 4 click-through recovery invariant intact, minimal floating widget synchronized. Verified by `W3-QUICKPANEL` and `smoke.ps1`. |
+| V1-EXPORT-001 | Storage / Data Engineer | Product + QA | `IExportService` / `ExportService`: Keyset-paged CSV export with metadata disclosure comments and formula injection neutralization (`=`, `+`, `-`, `@`, `\t`, `\r` prepended with `'`), valid typed-numeric JSON export with schema v1.0 and explicit nulls, atomic `.tmp` file replacement. Verified by `W3-EXPORT` fixtures. |
 | V1-AUDIT-002 | Audit Team / Director | Software Architect + QA | Independent forensic audit of V1 Wave 2 domain contracts. Remediated 13 defects (DEF-B01 through DEF-B13). 148 passed, 1 skipped, 0 failed. UI smoke test passed. `GATE B VERIFIED AFTER REPAIRS — WAVE 3 AUTHORIZED`. |
 | V1-USAGE-001 | Storage / Measurement | Architect + QA + Director | `HistoricalRange` canonical half-open `[start, end)` domain struct, `IntegerSplitter` monotonic cumulative allocation with `Int128` precision, `CompletenessState`, `UsageSummary`, and 0 SQL `SUM()` queries. Verified by `W2-SPLIT` and `W2-HIST` fixtures. |
 | V1-BILLING-001 | Measurement / Product | Architect + QA + Director | `CalendarRangeResolver` for Today, Yesterday, Week, Month, and Billing Cycle; dynamic day clamping (day 31 in Feb clamps to 28/29 without permanent mutation); dynamic DST (Lord Howe Island 30m, US 23h/25h) and Asia/Dhaka handling; opening balance isolation. Verified by `W2-CALENDAR` fixtures. |

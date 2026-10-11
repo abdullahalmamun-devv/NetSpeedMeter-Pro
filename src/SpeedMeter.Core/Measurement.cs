@@ -172,4 +172,6 @@ public static class MetricFormat
         while (value >= 1000 && index < units.Length - 1) { value /= 1000; index++; }
         return value.ToString("0.##", CultureInfo.InvariantCulture) + " " + units[index];
     }
+
+    public static string Bytes(long bytes) => Bytes((ulong)Math.Max(0L, bytes));
 }

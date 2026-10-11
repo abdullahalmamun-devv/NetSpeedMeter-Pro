@@ -1,0 +1,73 @@
+<UserControl x:Class="SpeedMeter.App.Views.NetworkToolsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="28,24,28,24">
+
+            <!-- Page Header -->
+            <DockPanel Margin="0,0,0,20">
+                <StackPanel>
+                    <TextBlock Text="Network Tools" FontSize="{StaticResource FontSizeHero}" FontWeight="SemiBold" />
+                    <TextBlock Text="Passive interface diagnostics, link topology and reachability status" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeBodySmall}" Margin="0,4,0,0" />
+                </StackPanel>
+            </DockPanel>
+
+            <!-- Network Details Card -->
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="24" Margin="0,0,0,20">
+                <StackPanel>
+                    <TextBlock Text="Passive Network Information" FontSize="{StaticResource FontSizeSubheading}" FontWeight="SemiBold" Margin="0,0,0,14" />
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="180" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="10" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="10" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="10" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Measurement Source:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Win32 GetIfTable2 (Kernel MIB interface table)" FontWeight="SemiBold" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Route Provider:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="Dual-Stack IPv4 / IPv6 with 3.0s Flap Debounce" FontWeight="SemiBold" />
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Privacy Boundary:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Text="Local-first. No public IP lookup or cloud telemetry transmitted." FontWeight="SemiBold" Foreground="{StaticResource StatusSuccessBrush}" />
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="VPN Accounting Policy:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" Text="Strict isolation. Virtual tunnel bytes never added to physical transport." FontWeight="SemiBold" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Active Probes Policy Card -->
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="24" Margin="0,0,0,20">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,12">
+                        <Border Background="#243750" CornerRadius="4" Padding="6,2" DockPanel.Dock="Right">
+                            <TextBlock Text="LOCAL ONLY" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AccentBrush}" />
+                        </Border>
+                        <TextBlock Text="Active Probes &amp; Speed Test" FontSize="{StaticResource FontSizeSubheading}" FontWeight="SemiBold" />
+                    </DockPanel>
+
+                    <TextBlock Text="In accordance with Section 12.2 and Section 24.2 of the PRD, SpeedMeter Pro does not execute automated background pings, HTTP reachability requests, or bandwidth tests without explicit user consent. No unsolicited network packets are generated during monitoring."
+                               TextWrapping="Wrap" LineHeight="20" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,12" />
+
+                    <TextBlock Text="Built-in speed test and multi-target ICMP latency benchmarks are scheduled for subsequent gated extensions with documented endpoint registries."
+                               FontSize="{StaticResource FontSizeBodySmall}" Foreground="{StaticResource MutedBrush}" />
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

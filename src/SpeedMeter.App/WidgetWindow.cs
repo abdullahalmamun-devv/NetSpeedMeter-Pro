@@ -238,7 +238,7 @@ internal sealed class WidgetWindow : Window
         EnsureVisibleOnScreen();
     }
 
-    private void EnsureVisibleOnScreen()
+    internal void EnsureVisibleOnScreen()
     {
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == 0 || !GetWindowRect(hwnd, out var rect)) return;

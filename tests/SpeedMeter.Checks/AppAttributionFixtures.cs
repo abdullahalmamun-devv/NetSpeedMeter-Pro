@@ -31,7 +31,7 @@ public static class AppAttributionFixtures
             var procA = new ProcessIdentity(1001, t0, "chrome", @"C:\Program Files\Google\Chrome\chrome.exe");
             var procB = new ProcessIdentity(1002, t0, "chrome", @"C:\Program Files\Google\Chrome\chrome.exe");
 
-            var app = new ApplicationIdentity("Google.Chrome", "Google Chrome", "", false, false);
+            var app = new SpeedMeter.Windows.ApplicationIdentity("Google.Chrome", "Google Chrome", "", false, false);
 
             Require(procA != procB, "Processes must have distinct identity");
             // This checks record structure only; it does not establish an implemented process-to-app mapper.
