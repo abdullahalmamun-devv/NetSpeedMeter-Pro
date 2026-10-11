@@ -1,10 +1,10 @@
 # Current milestone
 
-**V1.0 Production Engineering — GATE C VERIFIED AFTER REPAIRS · NEXT V1 WAVE AUTHORIZED.** Independent Gate C forensic audit complete. 8 audit defects (DEF-C01 through DEF-C08) identified and remediated. Strict presentation decoupling verified via reflection (zero CLR references to `SpeedMeter.Storage` or `Microsoft.Data.Sqlite` in `SpeedMeter.App.dll`). Dynamic settings-to-collector sync, multi-monitor/DPI `PlacementHelper`, tray semantic contract, monotonic query ID race prevention, and truthful storage degraded banner fully verified. 162 automated checks passing, 1 check explicitly skipped (SkipCheckException demonstration), 0 failed. Real Windows UI smoke test passing with exit code 0 and all 10 native assertions True. Independent Audit Director: lead agent. Updated 11 October 2026 (Asia/Dhaka).
+**V1.0 Production Engineering — GATE C FULLY CLOSED · NEXT V1 WAVE AUTHORIZED.** Independent Gate C final DPI closure and forensic audit complete. Resolved coordinate-system space mixing by establishing explicit `PhysicalPoint`, `PhysicalRect`, `DipPoint`, and `DipRect` contracts and a pure physical-pixel placement pipeline. Eliminated WinForms Screen fallback; all monitor resolution uses native Win32 `MonitorFromPoint`, `MonitorFromRect`, `MonitorFromWindow`, and `GetMonitorInfoW`. Quick Panel anchors to source window HWND or mouse cursor via `GetCursorPos`. Taskbar companion scales companion dimensions by `dpiScale` to physical pixels. Tray recovery operates purely semantically via `DisableClickThroughMenuItem` with zero positional index reliance (adversarial reorder test verified). 165 automated checks passing, 1 check explicitly skipped (SkipCheckException demonstration), 0 failed. Real Windows UI smoke test passing with exit code 0 and all 13 native assertions True. Independent Audit Director: lead agent. Updated 11 October 2026 (Asia/Dhaka).
 
 # In progress
 
-None. V1 Gate C forensic audit complete.
+None. V1 Gate C forensic audit and DPI closure fully complete.
 
 # Ready (Next Wave: V1.5 / Advanced Product Engineering)
 
@@ -20,7 +20,7 @@ None currently.
 
 | Task | Owner | Reviewer | Completion Evidence |
 |---|---|---|---|
-| V1-AUDIT-003 | Independent Audit Director | Software Architect + QA | Independent Gate C forensic audit of product surface, presentation isolation, multi-monitor/DPI, tray contract, settings sync, and export safety. Remediated 8 defects (DEF-C01 to DEF-C08). 162 passed, 1 skipped, 0 failed. Native UI smoke verified. `GATE C VERIFIED AFTER REPAIRS — NEXT V1 WAVE AUTHORIZED`. |
+| V1-AUDIT-003 | Independent Audit Director | Software Architect + QA | Final Gate C forensic audit and PerMonitorV2 coordinate closure: physical-pixel pipeline, explicit coordinate contracts (`PhysicalRect`/`DipRect`), Win32 monitor resolution, taskbar DPI scaling, zero-index tray recovery, native HWND placement verification, 5 deterministic multi-monitor topologies (Cases A–E). 165 passed, 1 skipped, 0 failed. Expanded UI smoke verified (13 assertions True). `GATE C FULLY CLOSED — NEXT V1 WAVE AUTHORIZED`. |
 | V1-DASH-001 | Desktop UI / UX | Accessibility + Product | Complete 5-destination navigation shell (`OverviewView`, `LiveTrafficView`, `AppsView`, `HistoryView`, `NetworkToolsView`, `SettingsView`), MVVM ViewModels, design tokens (`Tokens.xaml`, `ThemeDark.xaml`), tabular numerals, query cancellation token CTS in `HistoryViewModel`, basis points threshold formatting/parsing in `QuotaViewModel`, live graph windowing in `LiveTrafficViewModel`. Verified by fixtures and smoke test. |
 | V1-TRAY-001 | Windows Platform / UI | Architect + QA | `QuickPanelWindow` with multi-monitor work-area clamping, auto-dismiss on deactivate/Escape, Tray menu preserved with index 4 click-through recovery invariant intact, minimal floating widget synchronized. Verified by `W3-QUICKPANEL` and `smoke.ps1`. |
 | V1-EXPORT-001 | Storage / Data Engineer | Product + QA | `IExportService` / `ExportService`: Keyset-paged CSV export with metadata disclosure comments and formula injection neutralization (`=`, `+`, `-`, `@`, `\t`, `\r` prepended with `'`), valid typed-numeric JSON export with schema v1.0 and explicit nulls, atomic `.tmp` file replacement. Verified by `W3-EXPORT` fixtures. |

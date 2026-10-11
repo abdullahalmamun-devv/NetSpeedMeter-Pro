@@ -25,6 +25,20 @@ internal sealed class WidgetWindow : Window
     private static extern nint SetWindowLongPtr(nint hWnd, int nIndex, nint dwNewLong);
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct NativeMonitorInfo
+    {
+        public int cbSize;
+        public NativeRect rcMonitor;
+        public NativeRect rcWork;
+        public int dwFlags;
+    }
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromWindow(nint hwnd, uint dwFlags);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(nint hMonitor, ref NativeMonitorInfo lpmi);
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(nint hwnd, out NativeRect rect);
@@ -242,11 +256,17 @@ internal sealed class WidgetWindow : Window
     {
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == 0 || !GetWindowRect(hwnd, out var rect)) return;
-        // Work areas and HWND rectangles share physical coordinates. A virtual
-        // desktop bounding box may contain holes between actual monitors.
-        var area = System.Windows.Forms.Screen.FromHandle(hwnd).WorkingArea;
-        var x = Math.Clamp(rect.Left, area.Left, Math.Max(area.Left, area.Right - (rect.Right - rect.Left)));
-        var y = Math.Clamp(rect.Top, area.Top, Math.Max(area.Top, area.Bottom - (rect.Bottom - rect.Top)));
+
+        var hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if (hMon == 0) return;
+
+        var mi = new NativeMonitorInfo { cbSize = Marshal.SizeOf<NativeMonitorInfo>() };
+        if (!GetMonitorInfo(hMon, ref mi)) return;
+
+        var width = rect.Right - rect.Left;
+        var height = rect.Bottom - rect.Top;
+        var x = Math.Clamp(rect.Left, mi.rcWork.Left, Math.Max(mi.rcWork.Left, mi.rcWork.Right - width));
+        var y = Math.Clamp(rect.Top, mi.rcWork.Top, Math.Max(mi.rcWork.Top, mi.rcWork.Bottom - height));
         if (!SetWindowPos(hwnd, 0, x, y, 0, 0, 0x0015))
             throw new Win32Exception(Marshal.GetLastPInvokeError(), "Unable to restore the widget position.");
     }

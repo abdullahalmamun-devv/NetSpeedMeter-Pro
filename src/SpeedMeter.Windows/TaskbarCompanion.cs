@@ -122,6 +122,26 @@ public static class TaskbarCompanion
         }
     }
 
+    /// <summary>
+    /// Calculates taskbar-adjacent companion window placement in physical screen coordinates,
+    /// scaling companion DIP dimensions by the target monitor DPI scale factor.
+    /// </summary>
+    public static DockedPlacement CalculatePlacementWithDpi(
+        TaskbarInfo taskbar,
+        double companionWidthDip,
+        double companionHeightDip,
+        double dpiScale,
+        TaskbarRect workArea)
+    {
+        double scale = dpiScale > 0 ? dpiScale : 1.0;
+        double widthPx = companionWidthDip * scale;
+        double heightPx = companionHeightDip * scale;
+        return CalculatePlacement(taskbar, widthPx, heightPx, workArea);
+    }
+
+    /// <summary>
+    /// Calculates taskbar-adjacent companion window placement in physical screen pixels.
+    /// </summary>
     public static DockedPlacement CalculatePlacement(
         TaskbarInfo taskbar,
         double companionWidth,

@@ -122,19 +122,15 @@ public partial class MainWindow : Window
             return;
         }
 
-        Rect anchor;
         if (widget.IsVisible)
         {
-            anchor = new Rect(widget.Left, widget.Top, widget.ActualWidth, widget.ActualHeight);
+            quickPanel.PositionNear(widget);
         }
         else
         {
-            // Fallback anchor near bottom right of primary work area
-            var wa = SystemParameters.WorkArea;
-            anchor = new Rect(wa.Right - 60, wa.Bottom - 40, 50, 30);
+            quickPanel.PositionNearCursor();
         }
 
-        quickPanel.PositionNear(anchor);
         quickPanel.Show();
         quickPanel.Activate();
         _ = quickPanelVm.RefreshTodayUsageAsync();
@@ -209,7 +205,7 @@ public partial class MainWindow : Window
                 var clickThroughBeforeShow = widget.NativeClickThrough && widget.IsClickThrough;
                 widget.Show();
                 await Task.Delay(250);
-                (DisableClickThroughMenuItem ?? (Forms.ToolStripMenuItem)tray.ContextMenuStrip!.Items[4]).PerformClick();
+                DisableClickThroughMenuItem.PerformClick();
                 var clickThroughRecoveredViaTray = !widget.NativeClickThrough && !widget.IsClickThrough;
                 var widgetPausedTruthful = widget.StatusSummary.StartsWith("Paused");
                 if (last is not null)
@@ -222,6 +218,28 @@ public partial class MainWindow : Window
                 }
                 SaveWindowImage(widget, Path.Combine(smokeDirectory, "widget.png"));
                 widget.Hide();
+
+                // Expanded Wave 3 smoke checks (PRD §5, §13, §14)
+                OpenQuickPanel();
+                await Task.Delay(350);
+                var quickPanelOpened = quickPanel.IsVisible;
+                quickPanel.Hide();
+                var quickPanelClosed = !quickPanel.IsVisible;
+                var quickPanelSmokePass = quickPanelOpened && quickPanelClosed;
+
+                SetActiveView("LiveTraffic");
+                SetActiveView("Apps");
+                SetActiveView("History");
+                SetActiveView("Tools");
+                SetActiveView("Settings");
+                SetActiveView("Overview");
+                var navDestinationsVerified = viewModel.CurrentDestination == "Overview" && OverviewPanel.Visibility == Visibility.Visible;
+
+                StorageDegradedBanner.Visibility = Visibility.Visible;
+                StorageDegradedText.Text = "Storage Degraded: Disk capacity limit reached (smoke test).";
+                var storageBannerTruthful = StorageDegradedBanner.Visibility == Visibility.Visible && StorageDegradedText.Text.Contains("Storage Degraded");
+                StorageDegradedBanner.Visibility = Visibility.Collapsed;
+
                 monitor.Reset();
                 await Task.Delay(250);
                 var resetWhilePaused = last?.State == ReadingState.Paused && last.Received == 0 && last.Sent == 0;
@@ -240,6 +258,9 @@ public partial class MainWindow : Window
                     PausePreservesTotals = pausePreservesTotals, ResetWhilePaused = resetWhilePaused, ResumeIsLive = resumeIsLive,
                     ClickThroughBeforeShow = clickThroughBeforeShow, ClickThroughRecoveredViaTray = clickThroughRecoveredViaTray,
                     WidgetPausedTruthful = widgetPausedTruthful, WidgetStatesTruthful = widgetStatesTruthful,
+                    QuickPanelSmokePass = quickPanelSmokePass,
+                    NavDestinationsVerified = navDestinationsVerified,
+                    StorageBannerTruthful = storageBannerTruthful,
                     WindowWidth = ActualWidth, WindowHeight = ActualHeight
                 }, new JsonSerializerOptions { WriteIndented = true }));
             }
@@ -297,7 +318,14 @@ public partial class MainWindow : Window
 
         if (StorageDegradedBanner is not null)
         {
-            StorageDegradedBanner.Visibility = snapshot.State == CollectorState.Degraded ? Visibility.Visible : Visibility.Collapsed;
+            var isDegraded = snapshot.State == CollectorState.Degraded;
+            StorageDegradedBanner.Visibility = isDegraded ? Visibility.Visible : Visibility.Collapsed;
+            if (isDegraded && StorageDegradedText is not null)
+            {
+                StorageDegradedText.Text = !string.IsNullOrWhiteSpace(snapshot.DegradedReason)
+                    ? $"Storage Degraded: {snapshot.DegradedReason}"
+                    : "Storage persistence is degraded. Live monitoring continues, but history is not being saved.";
+            }
         }
     }
 

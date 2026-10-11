@@ -12,6 +12,7 @@ using SpeedMeter.App.ViewModels;
 using SpeedMeter.Application;
 using SpeedMeter.Core;
 using SpeedMeter.Storage;
+using SpeedMeter.Windows;
 
 namespace SpeedMeter.Checks;
 
@@ -437,39 +438,56 @@ public static class V1Wave3Fixtures
 
                 // Simulate positioning near various screen coordinates
                 var workArea = SystemParameters.WorkArea;
+                var physWa = new SpeedMeter.App.PhysicalRect(
+                    (int)Math.Round(workArea.Left),
+                    (int)Math.Round(workArea.Top),
+                    (int)Math.Round(workArea.Width),
+                    (int)Math.Round(workArea.Height));
 
-                // Anchor near bottom-right edge of screen (standard notification area anchor)
-                var bottomRightAnchor = new Rect(workArea.Right - 40, workArea.Bottom - 20, 30, 20);
-                window.PositionNear(bottomRightAnchor);
+                // 1. Anchor near bottom-right edge of screen (standard notification area anchor)
+                var bottomRightAnchor = new SpeedMeter.App.PhysicalRect(physWa.Right - 40, physWa.Bottom - 20, 30, 20);
+                var placedBottomRight = window.PositionNearPhysical(bottomRightAnchor, physWa);
 
-                Require(window.Left >= workArea.Left, $"Window Left ({window.Left}) must not exceed workArea Left ({workArea.Left}).");
-                Require(window.Left + window.Width <= workArea.Right, $"Window Right must not exceed workArea Right.");
-                Require(window.Top >= workArea.Top, $"Window Top ({window.Top}) must not exceed workArea Top.");
-                Require(window.Top + window.Height <= workArea.Bottom, $"Window Bottom must not exceed workArea Bottom.");
+                Require(placedBottomRight.Left >= physWa.Left, $"Window Left ({placedBottomRight.Left}) must not exceed workArea Left ({physWa.Left}).");
+                Require(placedBottomRight.Right <= physWa.Right, $"Window Right must not exceed workArea Right.");
+                Require(placedBottomRight.Top >= physWa.Top, $"Window Top ({placedBottomRight.Top}) must not exceed workArea Top.");
+                Require(placedBottomRight.Bottom <= physWa.Bottom, $"Window Bottom must not exceed workArea Bottom.");
 
-                // Anchor near top-left edge of screen
-                var topLeftAnchor = new Rect(workArea.Left - 50, workArea.Top - 50, 30, 20);
-                window.PositionNear(topLeftAnchor);
+                // 2. Anchor near top-left edge of screen
+                var topLeftAnchor = new SpeedMeter.App.PhysicalRect(physWa.Left - 50, physWa.Top - 50, 30, 20);
+                var placedTopLeft = window.PositionNearPhysical(topLeftAnchor, physWa);
 
-                Require(window.Left >= workArea.Left, "Top-left anchor clamped horizontally.");
-                Require(window.Top >= workArea.Top, "Top-left anchor clamped vertically.");
+                Require(placedTopLeft.Left >= physWa.Left, "Top-left anchor clamped horizontally.");
+                Require(placedTopLeft.Top >= physWa.Top, "Top-left anchor clamped vertically.");
 
-                // DEF-C01: Multi-monitor secondary display positioning verification
-                var secondaryRightWorkArea = new Rect(1920, 0, 1920, 1040);
-                var secondaryRightAnchor = new Rect(2500, 900, 40, 20);
-                window.PositionNear(secondaryRightAnchor, secondaryRightWorkArea);
-                Require(window.Left >= secondaryRightWorkArea.Left, "Secondary right monitor Left boundary honored.");
-                Require(window.Left + window.Width <= secondaryRightWorkArea.Right, "Secondary right monitor Right boundary honored.");
-                Require(window.Top >= secondaryRightWorkArea.Top, "Secondary right monitor Top boundary honored.");
-                Require(window.Top + window.Height <= secondaryRightWorkArea.Bottom, "Secondary right monitor Bottom boundary honored.");
+                // 3. Multi-monitor secondary display positioning verification
+                var secondaryRightWorkArea = new SpeedMeter.App.PhysicalRect(1920, 0, 1920, 1040);
+                var secondaryRightAnchor = new SpeedMeter.App.PhysicalRect(2500, 900, 40, 20);
+                var placedSecRight = window.PositionNearPhysical(secondaryRightAnchor, secondaryRightWorkArea);
+                Require(placedSecRight.Left >= secondaryRightWorkArea.Left, "Secondary right monitor Left boundary honored.");
+                Require(placedSecRight.Right <= secondaryRightWorkArea.Right, "Secondary right monitor Right boundary honored.");
+                Require(placedSecRight.Top >= secondaryRightWorkArea.Top, "Secondary right monitor Top boundary honored.");
+                Require(placedSecRight.Bottom <= secondaryRightWorkArea.Bottom, "Secondary right monitor Bottom boundary honored.");
 
-                var secondaryLeftWorkArea = new Rect(-1920, 0, 1920, 1040);
-                var secondaryLeftAnchor = new Rect(-500, 500, 40, 20);
-                window.PositionNear(secondaryLeftAnchor, secondaryLeftWorkArea);
-                Require(window.Left >= secondaryLeftWorkArea.Left, "Secondary left monitor Left boundary honored.");
-                Require(window.Left + window.Width <= secondaryLeftWorkArea.Right, "Secondary left monitor Right boundary honored.");
+                var secondaryLeftWorkArea = new SpeedMeter.App.PhysicalRect(-1920, 0, 1920, 1040);
+                var secondaryLeftAnchor = new SpeedMeter.App.PhysicalRect(-500, 500, 40, 20);
+                var placedSecLeft = window.PositionNearPhysical(secondaryLeftAnchor, secondaryLeftWorkArea);
+                Require(placedSecLeft.Left >= secondaryLeftWorkArea.Left, "Secondary left monitor Left boundary honored.");
+                Require(placedSecLeft.Right <= secondaryLeftWorkArea.Right, "Secondary left monitor Right boundary honored.");
+
+                // 4. Test PositionNear with Dummy Window anchor
+                var dummyWindow = new Window { Width = 260, Height = 136, Left = 100, Top = 100 };
+                var placedFromWindow = window.PositionNear(dummyWindow, physWa);
+                Require(placedFromWindow.Left >= physWa.Left, "Window-anchored placement Left clamped.");
+                Require(placedFromWindow.Right <= physWa.Right, "Window-anchored placement Right clamped.");
+
+                // 5. Test PositionNearCursor fallback
+                var placedFromCursor = window.PositionNearCursor(physWa);
+                Require(placedFromCursor.Left >= physWa.Left, "Cursor-anchored placement Left clamped.");
+                Require(placedFromCursor.Right <= physWa.Right, "Cursor-anchored placement Right clamped.");
 
                 window.Close();
+                dummyWindow.Close();
             }
             finally
             {
@@ -479,20 +497,145 @@ public static class V1Wave3Fixtures
 
         check("W3-PLACEMENT-MULTI-MONITOR: PlacementHelper handles multi-monitor coordinates deterministically", () =>
         {
-            var target = new Rect(2500, 800, 100, 40);
-            var secondaryWa = new Rect(1920, 0, 1920, 1040);
-            var placement = SpeedMeter.App.PlacementHelper.CalculatePlacement(target, 320, 480, secondaryWa);
+            // CASE A: Primary 1920x1080 (100%), Secondary Right 2560x1440 (150% scaling, 144 DPI)
+            // Target anchor on secondary at Physical [2500, 500, 390, 204]
+            // Quick Panel 280x300 DIP at 150% = 420x450 Physical px
+            var caseA_Wa = new SpeedMeter.App.PhysicalRect(1920, 0, 2560, 1400);
+            var caseA_Target = new SpeedMeter.App.PhysicalRect(2500, 500, 390, 204);
+            var caseA_Placed = SpeedMeter.App.PlacementHelper.CalculatePlacement(caseA_Target, 420, 450, caseA_Wa);
+            Require(caseA_Placed.Left >= caseA_Wa.Left + 8, "Case A: Left boundary clamping failed.");
+            Require(caseA_Placed.Right <= caseA_Wa.Right - 8, "Case A: Right boundary clamping failed.");
+            Require(caseA_Placed.Top >= caseA_Wa.Top + 8, "Case A: Top boundary clamping failed.");
+            Require(caseA_Placed.Bottom <= caseA_Wa.Bottom - 8, "Case A: Bottom boundary clamping failed.");
+            Require(caseA_Placed.Width == 420 && caseA_Placed.Height == 450, "Case A: Dimension scale multiplication error.");
 
-            Require(placement.Left >= secondaryWa.Left + 8.0, "Left boundary clamping failed.");
-            Require(placement.Left + placement.Width <= secondaryWa.Right - 8.0, "Right boundary clamping failed.");
-            Require(placement.Top >= secondaryWa.Top + 8.0, "Top boundary clamping failed.");
-            Require(placement.Top + placement.Height <= secondaryWa.Bottom - 8.0, "Bottom boundary clamping failed.");
+            // CASE B: Secondary Left negative X [-1920, 0, 1920, 1080] (125% scaling, 120 DPI)
+            // Quick Panel 280x300 DIP at 125% = 350x375 Physical px
+            var caseB_Wa = new SpeedMeter.App.PhysicalRect(-1920, 0, 1920, 1040);
+            var caseB_Target = new SpeedMeter.App.PhysicalRect(-800, 400, 325, 170);
+            var caseB_Placed = SpeedMeter.App.PlacementHelper.CalculatePlacement(caseB_Target, 350, 375, caseB_Wa);
+            Require(caseB_Placed.Left >= caseB_Wa.Left + 8, "Case B: Negative X Left boundary failed.");
+            Require(caseB_Placed.Right <= caseB_Wa.Right - 8, "Case B: Negative X Right boundary failed.");
+            Require(caseB_Placed.Top >= caseB_Wa.Top + 8, "Case B: Top boundary failed.");
+            Require(caseB_Placed.Bottom <= caseB_Wa.Bottom - 8, "Case B: Bottom boundary failed.");
+            Require(caseB_Placed.Width == 350 && caseB_Placed.Height == 375, "Case B: Dimension scale multiplication error.");
 
-            // Verify flip behavior when target is near bottom of secondary monitor
-            var bottomTarget = new Rect(2500, 1000, 100, 40);
-            var flippedPlacement = SpeedMeter.App.PlacementHelper.CalculatePlacement(bottomTarget, 320, 480, secondaryWa);
-            Require(flippedPlacement.Top < bottomTarget.Top, "Window did not flip above target when exceeding bottom work area.");
-            Require(flippedPlacement.Top + flippedPlacement.Height <= secondaryWa.Bottom - 8.0, "Flipped window exceeds bottom bounds.");
+            // CASE C: Secondary Above negative Y [0, -1440, 2560, 1440] (150% scaling, 144 DPI)
+            // Quick Panel 280x300 DIP at 150% = 420x450 Physical px
+            var caseC_Wa = new SpeedMeter.App.PhysicalRect(0, -1440, 2560, 1400);
+            var caseC_Target = new SpeedMeter.App.PhysicalRect(500, -600, 390, 204);
+            var caseC_Placed = SpeedMeter.App.PlacementHelper.CalculatePlacement(caseC_Target, 420, 450, caseC_Wa);
+            Require(caseC_Placed.Left >= caseC_Wa.Left + 8, "Case C: Left boundary failed.");
+            Require(caseC_Placed.Right <= caseC_Wa.Right - 8, "Case C: Right boundary failed.");
+            Require(caseC_Placed.Top >= caseC_Wa.Top + 8, "Case C: Negative Y Top boundary failed.");
+            Require(caseC_Placed.Bottom <= caseC_Wa.Bottom - 8, "Case C: Negative Y Bottom boundary failed.");
+            Require(caseC_Placed.Width == 420 && caseC_Placed.Height == 450, "Case C: Dimension scale multiplication error.");
+
+            // CASE D: Primary 2560x1440 (150%), Secondary Right 1920x1080 (100% scaling, 96 DPI)
+            // Quick Panel 280x300 DIP at 100% = 280x300 Physical px
+            var caseD_Wa = new SpeedMeter.App.PhysicalRect(2560, 0, 1920, 1040);
+            var caseD_Target = new SpeedMeter.App.PhysicalRect(3000, 300, 260, 136);
+            var caseD_Placed = SpeedMeter.App.PlacementHelper.CalculatePlacement(caseD_Target, 280, 300, caseD_Wa);
+            Require(caseD_Placed.Left >= caseD_Wa.Left + 8, "Case D: Secondary 100% Left boundary failed.");
+            Require(caseD_Placed.Right <= caseD_Wa.Right - 8, "Case D: Secondary 100% Right boundary failed.");
+            Require(caseD_Placed.Top >= caseD_Wa.Top + 8, "Case D: Top boundary failed.");
+            Require(caseD_Placed.Bottom <= caseD_Wa.Bottom - 8, "Case D: Bottom boundary failed.");
+            Require(caseD_Placed.Width == 280 && caseD_Placed.Height == 300, "Case D: Dimension scale multiplication error.");
+
+            // CASE E: Mixed 100% -> 4K 200% High-DPI [1920, 0, 3840, 2160] (192 DPI)
+            // Target anchor near bottom of 4K display forces vertical flip above target
+            // Quick Panel 280x300 DIP at 200% = 560x600 Physical px
+            var caseE_Wa = new SpeedMeter.App.PhysicalRect(1920, 0, 3840, 2100);
+            var caseE_BottomTarget = new SpeedMeter.App.PhysicalRect(3500, 1800, 520, 272);
+            var caseE_Placed = SpeedMeter.App.PlacementHelper.CalculatePlacement(caseE_BottomTarget, 560, 600, caseE_Wa);
+            Require(caseE_Placed.Top < caseE_BottomTarget.Top, "Case E: Window did not flip above target when exceeding bottom work area.");
+            Require(caseE_Placed.Bottom <= caseE_Wa.Bottom - 8, "Case E: Flipped window exceeds bottom bounds.");
+            Require(caseE_Placed.Top >= caseE_Wa.Top + 8, "Case E: Flipped window exceeds top bounds.");
+            Require(caseE_Placed.Left >= caseE_Wa.Left + 8, "Case E: 4K Left boundary failed.");
+            Require(caseE_Placed.Right <= caseE_Wa.Right - 8, "Case E: 4K Right boundary failed.");
+            Require(caseE_Placed.Width == 560 && caseE_Placed.Height == 600, "Case E: Dimension scale multiplication error.");
+        });
+
+        check("W3-TRAY-REORDER-SEMANTIC: Semantic tray item recovery operates independently of menu order", () => RunOnSta(() =>
+        {
+            var actionExecuted = false;
+
+            // Create an adversarial context menu where items are deliberately scrambled
+            var scrambledMenu = new System.Windows.Forms.ContextMenuStrip();
+            scrambledMenu.Items.Add("Quit"); // Index 0
+            scrambledMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator()); // Index 1
+            scrambledMenu.Items.Add("Random Action 1"); // Index 2
+            scrambledMenu.Items.Add("Pause"); // Index 3
+            scrambledMenu.Items.Add("Open Dashboard"); // Index 4 (old magic index now holds an unrelated command!)
+
+            var semanticItem = new System.Windows.Forms.ToolStripMenuItem("Disable click-through")
+            {
+                Name = "DisableClickThroughMenuItem",
+                Tag = "DisableClickThrough"
+            };
+            semanticItem.Click += (_, _) => actionExecuted = true;
+            scrambledMenu.Items.Add(semanticItem); // Index 5 (moved away from index 4)
+            scrambledMenu.Items.Add("Settings"); // Index 6
+
+            // Locate semantically via Tag/Name or typed reference, not index 4
+            var targetItem = scrambledMenu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>()
+                .FirstOrDefault(i => (string?)i.Tag == "DisableClickThrough" || i.Name == "DisableClickThroughMenuItem");
+
+            Require(targetItem != null, "Semantic recovery menu item must be located.");
+            Require(scrambledMenu.Items.IndexOf(targetItem!) != 4, "Adversarial test must ensure item is not at index 4.");
+
+            targetItem!.PerformClick();
+            Require(actionExecuted, "Recovery action must be executed via semantic activation regardless of menu position.");
+        }));
+
+        check("W3-QUICKPANEL-NATIVE-HWND: Native HWND placement conforms strictly to physical work area", () => RunOnSta(() =>
+        {
+            var fakeStorage = new FakeStorageEngine();
+            var historyService = new UsageHistoryService(fakeStorage);
+            var settingsPath = Path.Combine(Path.GetTempPath(), $"w3_hwnd_{Guid.NewGuid():N}.json");
+
+            try
+            {
+                var settingsService = new SettingsService(settingsPath);
+                var collector = new Collector(new FakeAdapterProvider(), new MeasurementClock());
+                var vm = new QuickPanelViewModel(collector, historyService, settingsService, () => { });
+                var window = new SpeedMeter.App.Views.QuickPanelWindow(vm);
+
+                // Position near a known physical anchor in the screen's coordinate space
+                var placed = window.PositionNearPhysical(new SpeedMeter.App.PhysicalRect(300, 300, 100, 50));
+                var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+                Require(hwnd != 0, "Native HWND must be created.");
+
+                // Query native window rect via Win32 GetWindowRect
+                var hasRect = SpeedMeter.App.PlacementHelper.TryGetWindowPhysicalRect(window, out var nativeRect);
+                Require(hasRect, "GetWindowRect must query native window bounds.");
+
+                var (_, workArea, _, _) = SpeedMeter.App.PlacementHelper.GetMonitorInfoForRect(placed);
+                Require(nativeRect.Left >= workArea.Left, $"Native Left ({nativeRect.Left}) must be within work area ({workArea.Left}).");
+                Require(nativeRect.Right <= workArea.Right, $"Native Right ({nativeRect.Right}) must be within work area ({workArea.Right}).");
+                Require(nativeRect.Top >= workArea.Top, $"Native Top ({nativeRect.Top}) must be within work area ({workArea.Top}).");
+                Require(nativeRect.Bottom <= workArea.Bottom, $"Native Bottom ({nativeRect.Bottom}) must be within work area ({workArea.Bottom}).");
+
+                window.Close();
+            }
+            finally
+            {
+                if (File.Exists(settingsPath)) File.Delete(settingsPath);
+            }
+        }));
+
+        check("W3-TASKBAR-DPI-CONSISTENCY: TaskbarCompanion scales DIPs to physical pixels without coordinate mixing", () =>
+        {
+            var bottomBar = new TaskbarInfo(new TaskbarRect(0, 1400, 2560, 1440), TaskbarEdge.Bottom, false, true);
+            var workArea = new TaskbarRect(0, 0, 2560, 1400);
+
+            // 200x40 DIP companion at 150% scaling (scale = 1.5)
+            // Physical size is 300x60 px
+            var placement = TaskbarCompanion.CalculatePlacementWithDpi(bottomBar, 200, 40, 1.5, workArea);
+
+            Require(!placement.UseFloatingFallback, "Docking must succeed.");
+            Require(placement.X == 2560 - 300 - 12, $"Expected X={2560 - 300 - 12}, got {placement.X}");
+            Require(placement.Y == 1400 - 60 - 4, $"Expected Y={1400 - 60 - 4}, got {placement.Y}");
         });
 
         check("W3-SETTINGS-SYNC: Settings changes propagate dynamically to Collector.Interval", () =>

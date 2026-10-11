@@ -1,13 +1,13 @@
 # Implementation status
 
 **Current release:** 0.1.0 development prototype; no GA release.  
-**Current milestone:** V1.0 Production Engineering — GATE C VERIFIED AFTER REPAIRS · NEXT V1 WAVE AUTHORIZED.  
+**Current milestone:** V1.0 Production Engineering — GATE C FULLY CLOSED · NEXT V1 WAVE AUTHORIZED.  
 **Updated:** 11 October 2026 (Asia/Dhaka).
 
 ## Build / test status
 
 - **Build:** Succeeded with 0 warnings, 0 errors across 6 projects (`Core`, `Windows`, `Storage`, `Application`, `App`, `Checks`) using .NET 10 SDK 10.0.401.
-- **Fixtures:** 162 passed, 1 skipped (explicit `SkipCheckException` test), 0 failed via `scripts/check.ps1 -Windows`:
+- **Fixtures:** 165 passed, 1 skipped (explicit `SkipCheckException` test), 0 failed via `scripts/check.ps1 -Windows`:
   - 14 baseline arithmetic and boundary checks
   - 21 epoch, large counter, and delta discontinuity fixtures (including mandatory 125 MB / 10s = 12.5 MB/s and 100 Mbps)
   - 7 application collector lifecycle and resilience fixtures
@@ -19,7 +19,7 @@
   - 10 V1 Foundation Wave 1 fixtures in `V1FoundationFixtures.cs` (AutoPrimary, ScopeStabilizer, BLOB codecs, checked math, rollup uniqueness, crash gaps, degradation resilience)
   - 10 V1 Foundation Gate A forensic audit fixtures in `V1FoundationFixtures.cs` (zero overlap crash gaps, child process restart, FailFast recovery, degraded storage snapshot, queue saturation)
   - 28 V1 Wave 2 & Gate B audit fixtures in `V1Wave2Fixtures.cs` (IntegerSplitter Int128 conservation, calendar/billing cycle day 31 clamping, Lord Howe Island 30m DST, half-open boundaries, coverage denominator, quota basis points deduplication, bounded live graph buffer, atomic settings persistence)
-  - 14 V1 Wave 3 & Gate C fixtures in `V1Wave3Fixtures.cs`:
+  - 17 V1 Wave 3 & Gate C closure fixtures in `V1Wave3Fixtures.cs`:
     - `W3-EXPORT`: Keyset-paged CSV export with metadata disclosure and formula injection prevention (`=`, `+`, `-`, `@`, `\t`, `\r` prepended with `'`)
     - `W3-EXPORT`: JSON export schema validity, explicit nulls, and typed numerics
     - `W3-EXPORT`: Atomic file export leaves target untouched on failure or cancellation (`.tmp` atomic replacement)
@@ -29,14 +29,17 @@
     - `W3-SETTINGS`: SettingsViewModel atomic persistence and sanitization round-trip
     - `W3-GRAPH`: Live graph downsampling preserves gap breaks without connecting lines across gaps
     - `W3-APPCONTEXT`: ApplicationContext end-to-end integration wires Collector to LiveGraph and Storage
-    - `W3-QUICKPANEL`: QuickPanelWindow positioning clamps strictly within work area
-    - `W3-PLACEMENT-MULTI-MONITOR`: PlacementHelper handles multi-monitor coordinates deterministically
+    - `W3-QUICKPANEL`: QuickPanelWindow positioning clamps strictly within work area across physical and cursor anchors
+    - `W3-PLACEMENT-MULTI-MONITOR`: PlacementHelper handles multi-monitor coordinates deterministically across 5 heterogeneous topologies (Cases A through E)
+    - `W3-TRAY-REORDER-SEMANTIC`: Semantic tray item recovery operates independently of menu order (zero positional index reliance)
+    - `W3-QUICKPANEL-NATIVE-HWND`: Native HWND placement conforms strictly to physical work area queried via `GetWindowRect`
+    - `W3-TASKBAR-DPI-CONSISTENCY`: TaskbarCompanion scales DIPs to physical pixels without coordinate mixing
     - `W3-SETTINGS-SYNC`: Settings changes propagate dynamically to Collector.Interval
     - `W3-ARCH-BOUNDARY`: SpeedMeter.App does not reference SpeedMeter.Storage or Microsoft.Data.Sqlite
     - `W3-APPS-TRUTHFUL`: Apps page exposes truthful V1.5 gating without simulated processes
   - 3 performance and stability benchmarks (preliminary microbenchmarks)
   - 4 live Windows IP Helper, RouteProvider, and TaskbarCompanion checks
-- **UI Smoke:** Real WPF shell, production navigation, Quick Panel, and floating widget smoke test passing via `scripts/smoke.ps1` on Windows build 19045 (`.NET 10.0.12`) with all 10 native assertions True.
+- **UI Smoke:** Real WPF shell, production navigation, Quick Panel, and floating widget smoke test passing via `scripts/smoke.ps1` on Windows build 19045 (`.NET 10.0.12`) with all 13 native assertions True.
 
 ## Implemented verified paths
 
