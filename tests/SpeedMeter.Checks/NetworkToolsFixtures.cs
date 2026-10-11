@@ -5,6 +5,8 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using SpeedMeter.App;
@@ -30,6 +32,10 @@ internal static class NetworkToolsFixtures
         check("W4-TOOLS: Public IP lookup rejects oversized response and provider error", PublicIpErrorHandling);
         check("W4-NETINFO: Network details provider contract labels link speed truthfully", NetworkDetailsTruthfulness);
         check("W4-NETINFO: Wi-Fi metadata queries correlate strictly to selected adapter and avoid ambiguous band guessing", WifiDetailsSelectedAdapterCorrelation);
+        check("W4-NETINFO: WLAN-BSS-MATCH-01 selects frequency from matching BSSID regardless of list ordering", WifiBssMatchOrderIndependence);
+        check("W4-NETINFO: BSSID disambiguation distinguishes access points sharing the same SSID", WifiBssSameSsidDifferentBssid);
+        check("W4-NETINFO: Unmatched connected BSSID returns Band unavailable without borrowing visible frequencies", WifiBssUnmatchedReturnsUnavailable);
+        check("W4-NETINFO: Zero or empty connected BSSID returns Band unavailable", WifiBssZeroOrEmptyBssidReturnsUnavailable);
         check("W4-STORAGE: SqliteStorageEngine applies migration 3 and persists connectivity & alert timeline", StorageMigrationAndTimeline);
         check("W4-STORAGE: Migration upgrades authentic schema v2 to v3 preserving existing history and data", StorageMigrationV2ToV3Fidelity);
         check("W4-STORAGE: Pruning and clear history maintain transaction safety and table integrity", StoragePruneAndClearIntegrity);
@@ -267,6 +273,171 @@ internal static class NetworkToolsFixtures
         Require(profileA == "Office Network", "Expected friendly profile name 'Office Network'.");
         var profileUnknown = mockNlm.GetProfileName(Guid.NewGuid());
         Require(profileUnknown is null, "Unknown adapter must return null profile name rather than inventing one.");
+    }
+
+    private static unsafe (nint Ptr, int Size) CreateNativeBssBuffer(params (byte[] Bssid, uint FreqKhz, string Ssid)[] entries)
+    {
+        var headerSize = sizeof(WindowsWlanQueryProvider.WlanBssListHeader);
+        var entrySize = sizeof(WindowsWlanQueryProvider.WlanBssEntry);
+        var totalSize = headerSize + (entrySize * entries.Length);
+        var pMem = Marshal.AllocHGlobal(totalSize);
+
+        var pBytes = (byte*)pMem;
+        for (int i = 0; i < totalSize; i++) pBytes[i] = 0;
+
+        var pHeader = (WindowsWlanQueryProvider.WlanBssListHeader*)pMem;
+        pHeader->TotalSize = (uint)totalSize;
+        pHeader->NumberOfItems = (uint)entries.Length;
+
+        for (int i = 0; i < entries.Length; i++)
+        {
+            var (bssid, freqKhz, ssid) = entries[i];
+            var pEntry = (WindowsWlanQueryProvider.WlanBssEntry*)(pBytes + headerSize + (i * entrySize));
+
+            var ssidBytes = Encoding.UTF8.GetBytes(ssid);
+            pEntry->Dot11Ssid.Length = (uint)Math.Min(ssidBytes.Length, 32);
+            for (int b = 0; b < pEntry->Dot11Ssid.Length; b++)
+            {
+                pEntry->Dot11Ssid.Bytes[b] = ssidBytes[b];
+            }
+
+            for (int b = 0; b < 6 && b < bssid.Length; b++)
+            {
+                pEntry->Dot11Bssid[b] = bssid[b];
+            }
+
+            pEntry->ChCenterFrequency = freqKhz;
+        }
+
+        return (pMem, totalSize);
+    }
+
+    private static void WifiBssMatchOrderIndependence()
+    {
+        // WLAN-BSS-MATCH-01:
+        // Visible APs:
+        // Entry 0: AP-Guest, 2.4 GHz (2412000 kHz, Ch 1), BSSID: AA:BB:CC:01:01:01
+        // Entry 1: AP-Home, 5 GHz (5180000 kHz, Ch 36), BSSID: AA:BB:CC:02:02:02
+        // Entry 2: AP-6G, 6 GHz (5975000 kHz, Ch 5), BSSID: AA:BB:CC:03:03:03
+        var bssidGuest = new byte[] { 0xAA, 0xBB, 0xCC, 0x01, 0x01, 0x01 };
+        var bssidHome = new byte[] { 0xAA, 0xBB, 0xCC, 0x02, 0x02, 0x02 };
+        var bssid6G = new byte[] { 0xAA, 0xBB, 0xCC, 0x03, 0x03, 0x03 };
+
+        var (pBuffer, _) = CreateNativeBssBuffer(
+            (bssidGuest, 2412000, "AP-Guest"),
+            (bssidHome, 5180000, "AP-Home"),
+            (bssid6G, 5975000, "AP-6G")
+        );
+
+        try
+        {
+            // Case 1: Connected to AP-Home (Index 1).
+            // A naive implementation choosing Entry 0 would wrongly return "2.4 GHz" and channel 1.
+            var resHome = WindowsWlanQueryProvider.CorrelateBssDetails(pBuffer, bssidHome);
+            Require(resHome.Band == "5 GHz", $"Expected '5 GHz' for connected AP-Home BSSID, got '{resHome.Band}'.");
+            Require(resHome.Channel == 36, $"Expected channel 36 for connected AP-Home BSSID, got '{resHome.Channel}'.");
+            Require(resHome.Limitation.Contains("observed from matching Windows WLAN BSS"), "Expected success limitation message.");
+
+            // Case 2: Connected to AP-6G (Index 2).
+            var res6G = WindowsWlanQueryProvider.CorrelateBssDetails(pBuffer, bssid6G);
+            Require(res6G.Band == "6 GHz", $"Expected '6 GHz' for connected AP-6G BSSID, got '{res6G.Band}'.");
+            Require(res6G.Channel == 5, $"Expected channel 5 for connected AP-6G BSSID, got '{res6G.Channel}'.");
+
+            // Case 3: Connected to AP-Guest (Index 0).
+            var resGuest = WindowsWlanQueryProvider.CorrelateBssDetails(pBuffer, bssidGuest);
+            Require(resGuest.Band == "2.4 GHz", $"Expected '2.4 GHz' for connected AP-Guest BSSID, got '{resGuest.Band}'.");
+            Require(resGuest.Channel == 1, $"Expected channel 1 for connected AP-Guest BSSID, got '{resGuest.Channel}'.");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(pBuffer);
+        }
+    }
+
+    private static void WifiBssSameSsidDifferentBssid()
+    {
+        // SAME SSID / DIFFERENT BSSID:
+        // Multi-AP mesh/enterprise environment sharing the exact same SSID "Corporate-Wi-Fi":
+        // AP 1 (2.4 GHz): BSSID 10:20:30:40:50:01, Frequency 2437000 (Ch 6)
+        // AP 2 (5 GHz): BSSID 10:20:30:40:50:02, Frequency 5745000 (Ch 149)
+        var bssid24 = new byte[] { 0x10, 0x20, 0x30, 0x40, 0x50, 0x01 };
+        var bssid50 = new byte[] { 0x10, 0x20, 0x30, 0x40, 0x50, 0x02 };
+
+        var (pBuffer, _) = CreateNativeBssBuffer(
+            (bssid24, 2437000, "Corporate-Wi-Fi"),
+            (bssid50, 5745000, "Corporate-Wi-Fi")
+        );
+
+        try
+        {
+            // Device is connected to the 5 GHz AP (AP 2).
+            // Comparing SSID alone would be ambiguous or match the first 2.4 GHz entry.
+            // BSSID matching must strictly match AP 2.
+            var res = WindowsWlanQueryProvider.CorrelateBssDetails(pBuffer, bssid50);
+            Require(res.Band == "5 GHz", $"Expected '5 GHz' when connected to AP 2, got '{res.Band}'.");
+            Require(res.Channel == 149, $"Expected channel 149 when connected to AP 2, got '{res.Channel}'.");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(pBuffer);
+        }
+    }
+
+    private static void WifiBssUnmatchedReturnsUnavailable()
+    {
+        // BSSID NOT FOUND:
+        // Visible scan list contains only AP 1. Connected device reports a different BSSID
+        // (e.g. stealth/hidden SSID or transient state before scan update).
+        var bssidVisible = new byte[] { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 };
+        var bssidConnectedUnmatched = new byte[] { 0x99, 0x88, 0x77, 0x66, 0x55, 0x44 };
+
+        var (pBuffer, _) = CreateNativeBssBuffer(
+            (bssidVisible, 5180000, "Visible-AP")
+        );
+
+        try
+        {
+            // Must return "Band unavailable", preserve fallback channel if provided,
+            // and NOT borrow visible frequency (5180000).
+            var res = WindowsWlanQueryProvider.CorrelateBssDetails(pBuffer, bssidConnectedUnmatched, fallbackChannel: 44);
+            Require(res.Band == "Band unavailable", $"Unmatched BSSID must return 'Band unavailable', got '{res.Band}'.");
+            Require(res.Channel == 44, "Fallback channel must be preserved when band is unavailable.");
+            Require(res.Limitation.Contains("was not found in visible WLAN BSS list"), $"Expected limitation about BSS not found, got: {res.Limitation}");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(pBuffer);
+        }
+    }
+
+    private static void WifiBssZeroOrEmptyBssidReturnsUnavailable()
+    {
+        var (pBuffer, _) = CreateNativeBssBuffer(
+            (new byte[] { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 }, 2412000, "Visible-AP")
+        );
+
+        try
+        {
+            // All-zeros BSSID indicates unassociated or transitioning state.
+            var zeroBssid = new byte[] { 0, 0, 0, 0, 0, 0 };
+            var resZero = WindowsWlanQueryProvider.CorrelateBssDetails(pBuffer, zeroBssid);
+            Require(resZero.Band == "Band unavailable", "Zero BSSID must return 'Band unavailable'.");
+            Require(resZero.Limitation.Contains("unavailable or unassociated"), "Zero BSSID must indicate unassociated limitation.");
+
+            // Truncated BSSID (< 6 bytes)
+            var shortBssid = new byte[] { 0x11, 0x22 };
+            var resShort = WindowsWlanQueryProvider.CorrelateBssDetails(pBuffer, shortBssid);
+            Require(resShort.Band == "Band unavailable", "Short BSSID must return 'Band unavailable'.");
+            Require(resShort.Limitation.Contains("unavailable or unassociated"), "Short BSSID must indicate unassociated limitation.");
+
+            // Null buffer
+            var resNullList = WindowsWlanQueryProvider.CorrelateBssDetails(0, new byte[] { 1, 2, 3, 4, 5, 6 });
+            Require(resNullList.Band == "Band unavailable", "Null BSS list pointer must return 'Band unavailable'.");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(pBuffer);
+        }
     }
 
     private static void StorageMigrationAndTimeline()

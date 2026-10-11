@@ -4,7 +4,7 @@ A high-performance, truthful Windows desktop network telemetry, accounting, and 
 
 **Status: V1.0 Wave 4 complete; Gate D formally passed.** Gate A, B, C, and D work remain integrated. The Wave 4 product-authority decision accepts repeated UTC labels across recorded clock segments under the byte and uncertainty safeguards in ADR-011. Real sleep, live clock transitions, Windows 11, and whole-app shutdown evidence remain designated as public release-gate work.
 
-The executable Windows fixture run passed 236 checks, with 1 intentional skip and 0 failures (229 passed in standard `check.ps1`). The post-change native WPF smoke passed all 18 assertions on Windows 10 x64. These results do not validate real hardware sleep or Windows 11.
+The executable Windows fixture run passed 241 checks, with 1 intentional skip and 0 failures (233 passed in standard `check.ps1`). The post-change native WPF smoke passed all 18 assertions on Windows 10 x64. These results do not validate real hardware sleep or Windows 11.
 
 ---
 

@@ -204,6 +204,42 @@ if (args.Contains("--windows"))
         }
     });
 
+    Check("Windows native WLAN BSSID correlation and band truth", () =>
+    {
+        var provider = new WindowsWlanQueryProvider();
+        var wlanNics = NetworkInterface.GetAllNetworkInterfaces()
+            .Where(n => n.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 && n.OperationalStatus == OperationalStatus.Up)
+            .ToList();
+
+        if (wlanNics.Count == 0)
+        {
+            Console.WriteLine("  No operational Wireless80211 interface detected; live Wi-Fi probe skipped.");
+            return;
+        }
+
+        var verifiedCount = 0;
+        foreach (var nic in wlanNics)
+        {
+            if (!Guid.TryParse(nic.Id, out var adapterGuid)) continue;
+            var details = provider.QueryWifiDetails(adapterGuid);
+            Console.WriteLine($"  Live WLAN check on '{nic.Name}': SSID={(details.Ssid is not null ? "[REDACTED]" : "null")}, Band={details.Band}, Channel={details.Channel}, Auth={details.Auth}, Limitation={details.Limitation}");
+
+            // Filter out NDIS lightweight filter miniports which are not Native Wifi WLAN interfaces
+            if (details.Limitation.Contains("not a Windows WLAN interface"))
+            {
+                continue;
+            }
+
+            Require(details.Ssid is not null, "Active operational Wi-Fi must report non-null SSID.");
+            Require(details.Band is not null && details.Band != "Band unavailable", $"Active operational Wi-Fi must resolve valid band, got: {details.Band}");
+            Require(details.Channel is not null && details.Channel > 0, $"Active operational Wi-Fi must report valid channel, got: {details.Channel}");
+            Require(details.Limitation.Contains("observed from matching Windows WLAN BSS"), $"Limitation must confirm BSSID matching, got: {details.Limitation}");
+            verifiedCount++;
+        }
+
+        Require(verifiedCount > 0, "Expected at least one operational Windows WLAN adapter to be verified.");
+    });
+
     SpeedMeter.Checks.PerfFixtures.Run(Check);
 }
 Console.WriteLine($"Checks summary: {passed} passed, {skipped} skipped, {failed} failed. Total evaluated: {passed + skipped + failed}. Exit code: {Environment.ExitCode}.");

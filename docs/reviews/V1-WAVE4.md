@@ -15,7 +15,7 @@
 - **Hysteresis & Truthfulness:** Verified that 3 consecutive failure rounds are required to transition to `ChecksFailing`, and 2 consecutive successful rounds recover to `Reachable`. Single failed pings never claim global downtime. Captive portals report `SignInSuspected` truthfully.
 
 ### B. Network Tools & Windows Information Review (Platform & Privacy)
-- **Truthful Interface Link Speed & Wi-Fi Identity:** Verified that network adapter link speed is explicitly labeled as interface link speed and clearly disambiguated from actual internet speed. Wi-Fi metadata queries use native Windows WLAN API (`wlanapi.dll`) P/Invoke, strictly correlating metadata to the selected adapter GUID (`nic.Id`) rather than parsing localized `netsh` console text. Frequency-based band identification guarantees no guessing from channel numbers. Friendly profile name uses NLM COM API or reports null truthfully.
+- **Truthful Interface Link Speed & Wi-Fi Identity:** Verified that network adapter link speed is explicitly labeled as interface link speed and clearly disambiguated from actual internet speed. Wi-Fi metadata queries use native Windows WLAN API (`wlanapi.dll`) P/Invoke, strictly correlating metadata to the selected adapter GUID (`nic.Id`) and connected BSSID matching (explicit 6-byte MAC comparison without list ordering assumptions or frequency borrowing). Frequency-based band identification guarantees no guessing from channel numbers. Unmatched or unassociated BSSID returns "Band unavailable" without fabricating values. Friendly profile name uses NLM COM API or reports null truthfully.
 - **Public IP Privacy Disclosure:** Verified that public IP lookup requires explicit user opt-in before query execution, queries approved HTTPS providers only, and informs the user of egress NAT/VPN caveats.
 - **Injection Safety:** Hostnames entered into Ping and DNS tools are validated and sanitized; no shell command or argument injection is possible.
 
@@ -37,9 +37,9 @@
 | Test Suite | Result | Details |
 |---|---|---|
 | Solution Build | **0 Errors, 0 Warnings** | Release x64 build across 6 projects |
-| Core Checks (`check.ps1`) | **229 PASS, 1 SKIP, 0 FAIL** | 230 total evaluated; 1 intentional DeskBand skip |
-| Windows Checks (`check.ps1 -Windows`) | **236 PASS, 1 SKIP, 0 FAIL** | 237 total evaluated; includes native GetIfTable2, RouteProvider, Taskbar, and Perf checks |
-| Interactive WPF Smoke (`smoke.ps1`) | **18/18 PASS** | All 18 native assertions True; dashboard.png and widget.png captured (`artifacts/smoke-20261012-020426`) |
+| Core Checks (`check.ps1`) | **233 PASS, 1 SKIP, 0 FAIL** | 234 total evaluated; 1 intentional DeskBand skip |
+| Windows Checks (`check.ps1 -Windows`) | **241 PASS, 1 SKIP, 0 FAIL** | 242 total evaluated; includes native GetIfTable2, RouteProvider, Taskbar, live WLAN BSSID correlation, and Perf checks |
+| Interactive WPF Smoke (`smoke.ps1`) | **18/18 PASS** | All 18 native assertions True; dashboard.png and widget.png captured (`artifacts/smoke-20261012-023350`) |
 
 ---
 

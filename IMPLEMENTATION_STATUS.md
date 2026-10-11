@@ -7,7 +7,7 @@
 ## Build / test status
 
 - **Build:** Succeeded with 0 warnings, 0 errors across 6 projects (`Core`, `Windows`, `Storage`, `Application`, `App`, `Checks`) using .NET 10 SDK 10.0.401.
-- **Fixtures:** 229 passed, 1 intentional skip, 0 failed via `scripts/check.ps1`; 236 passed, 1 skip, 0 failed via `scripts/check.ps1 -Windows` with process-local `NuGetAudit=false`. Total evaluated: 237. Groups include:
+- **Fixtures:** 233 passed, 1 intentional skip, 0 failed via `scripts/check.ps1`; 241 passed, 1 skip, 0 failed via `scripts/check.ps1 -Windows` with process-local `NuGetAudit=false`. Total evaluated: 242. Groups include:
   - 14 baseline arithmetic and boundary checks
   - 21 epoch, large counter, and delta discontinuity fixtures (including mandatory 125 MB / 10s = 12.5 MB/s and 100 Mbps)
   - 7 application collector lifecycle and resilience fixtures
@@ -24,11 +24,11 @@
   - 14 adversarial clock and shutdown fixtures in `V1ClockShutdownFixtures.cs`
   - 11 connectivity and reachability fixtures in `ConnectivityFixtures.cs` (AC-C01–C07: blocked ICMP with HTTPS, 3-round fail / 2-round recovery hysteresis, captive portal sign-in detection, sleep closure, metered suppression, proxy authentication, stale expiry, scope change cancellation, bounded concurrency)
   - 11 alert engine fixtures in `AlertFixtures.cs` (AC-N01–N07: local disconnect debounce, reachability multi-check evidence, high ping 30s mean, stale/paused suppression, restart deduplication, cooldown, quiet hours popup suppression, rule revision stability, quota event single consumption, disabled probe safety)
-  - 17 network tools, privacy, and V1-Must closure fixtures in `NetworkToolsFixtures.cs` (AC-D01–D07: host normalization/anti-injection, A/AAAA DNS resolution, ping RTT min/max/mean without NaN, ping default 10 attempts per PRD contract, public IP disclosure requirement, HTTPS provider verification, egress NAT caveat, truthful link speed labeling, zero-traffic privacy invariant, native Windows WLAN API (wlanapi.dll) metadata correlation by adapter GUID and frequency-based band detection without channel guessing, NLM COM friendly profile name query, authentic storage migration v2->v3 fidelity, transaction-safe history pruning/clearing, single-instance per-user SID mutex and lockfile ownership with clean exit code 0, low-resource UI throttling)
+  - 21 network tools, privacy, and V1-Must closure fixtures in `NetworkToolsFixtures.cs` (AC-D01–D07: host normalization/anti-injection, A/AAAA DNS resolution, ping RTT min/max/mean without NaN, ping default 10 attempts per PRD contract, public IP disclosure requirement, HTTPS provider verification, egress NAT caveat, truthful link speed labeling, zero-traffic privacy invariant, native Windows WLAN API (wlanapi.dll) metadata correlation by adapter GUID and connected BSSID matching without ordering assumptions or frequency borrowing, NLM COM friendly profile name query, authentic storage migration v2->v3 fidelity, transaction-safe history pruning/clearing, single-instance per-user SID mutex and lockfile ownership with clean exit code 0, low-resource UI throttling)
   - 7 configuration export/import fixtures in `ConfigExportImportFixtures.cs` (AC-U09, AC-S09: atomic file export, round-trip fidelity, malformed rejection, future schema rejection, rule validation, privacy preservation invariant)
   - 3 performance and stability benchmarks (preliminary microbenchmarks)
-  - 4 live Windows IP Helper, RouteProvider, and TaskbarCompanion checks
-- **UI Smoke:** Real WPF shell, production navigation across all 5 primary views individually, Quick Panel, and floating widget smoke passed via `scripts/smoke.ps1` on Windows build 19045 (`.NET 10.0.12`) with all 18 native assertions True (`artifacts/smoke-20261012-020426`).
+  - 5 live Windows IP Helper, RouteProvider, TaskbarCompanion, and native WLAN BSSID correlation checks
+- **UI Smoke:** Real WPF shell, production navigation across all 5 primary views individually, Quick Panel, and floating widget smoke passed via `scripts/smoke.ps1` on Windows build 19045 (`.NET 10.0.12`) with all 18 native assertions True (`artifacts/smoke-20261012-023350`).
 
 ## Implemented verified paths
 
@@ -73,8 +73,8 @@
 
 - **Host Environment:** Microsoft Windows 10 Pro x64 (build 10.0.19045.0), 4 logical processors, .NET 10.0.12 runtime. Developer evidence only; not a release port authorization.
 - **Observed:**
-  - 229 passed checks, 1 intentional skip, 0 failed checks via `check.ps1`; 236 passed checks, 1 skip, 0 failed via `check.ps1 -Windows`. Exit code: 0.
-  - Post-change UI smoke test passed with all 18 native assertions verified (`True`). Exit code: 0. Window geometry: 1160x780. Artifact: `artifacts/smoke-20261012-020426`.
+  - 233 passed checks, 1 intentional skip, 0 failed checks via `check.ps1`; 241 passed checks, 1 skip, 0 failed via `check.ps1 -Windows`. Exit code: 0.
+  - Post-change UI smoke test passed with all 18 native assertions verified (`True`). Exit code: 0. Window geometry: 1160x780. Artifact: `artifacts/smoke-20261012-023350`.
 
 ## Clock and shutdown truth limits
 

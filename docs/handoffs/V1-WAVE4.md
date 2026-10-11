@@ -14,7 +14,7 @@
 - **Host OS:** Windows 10 Pro x64 (build 10.0.19045.0), 4 logical processors
 - **Runtime:** .NET 10.0.12 (SDK 10.0.401)
 - **Baseline checks:** 197 PASS, 1 intentional SKIP, 0 FAIL; 18/18 WPF smoke assertions True
-- **Final checks:** 229 PASS, 1 intentional SKIP, 0 FAIL (standard `scripts/check.ps1`); 236 PASS, 1 intentional SKIP, 0 FAIL (`scripts/check.ps1 -Windows`); 18/18 WPF smoke assertions True (`scripts/smoke.ps1`)
+- **Final checks:** 233 PASS, 1 intentional SKIP, 0 FAIL (standard `scripts/check.ps1`); 241 PASS, 1 intentional SKIP, 0 FAIL (`scripts/check.ps1 -Windows`); 18/18 WPF smoke assertions True (`scripts/smoke.ps1`)
 
 ---
 
@@ -33,7 +33,7 @@
 - **Lifecycle & Staleness:** Probes are bounded to 3-second timeouts. System suspend immediately closes observed connectivity incidents with uncertain end timestamps; stale successful checks expire rather than staying indefinitely green.
 
 ### B. Windows Network Information & Diagnostic Tools (`V1-NETINFO-001`, `V1-TOOLS-001`)
-- **Truthful Network Details:** `NetworkDetailsProvider` extracts Windows adapter metadata (IPv4/IPv6 addresses, default gateway, DNS servers, DHCP status) and Native Windows WLAN API (`wlanapi.dll`) Wi-Fi telemetry (SSID, Signal %, Band, Channel, Auth) correlated strictly by selected adapter GUID (`nic.Id`). Frequency-based band identification prevents channel guessing; friendly profile name is retrieved via Network List Manager (NLM) COM API or reported unavailable truthfully. Interface link speed is strictly labeled as "Interface Link Speed" and explicitly noted as distinct from internet throughput.
+- **Truthful Network Details:** `NetworkDetailsProvider` extracts Windows adapter metadata (IPv4/IPv6 addresses, default gateway, DNS servers, DHCP status) and Native Windows WLAN API (`wlanapi.dll`) Wi-Fi telemetry (SSID, Signal %, Band, Channel, Auth) correlated strictly by selected adapter GUID (`nic.Id`) and connected BSSID matching (explicit 6-byte MAC comparison without list ordering assumptions or visible frequency borrowing). Frequency-based band identification prevents channel guessing; friendly profile name is retrieved via Network List Manager (NLM) COM API or reported unavailable truthfully. Interface link speed is strictly labeled as "Interface Link Speed" and explicitly noted as distinct from internet throughput.
 - **User-Initiated Ping Tool:** Bounded ping benchmark with configurable count (default 10 attempts per PRD §16 contract) and 3-second timeout. Computes minimum, maximum, and mean RTT without NaN on packet loss; handles local errors and cancellation gracefully.
 - **DNS Resolution Tool:** Resolves IPv4 (A) and IPv6 (AAAA) records; strictly validates and normalizes hostnames to prevent command or argument injection; reports timeouts and failures truthfully.
 - **Privacy-Guarded Public IP Lookup:** Manual on-demand lookup strictly requiring explicit user acknowledgment/disclosure before each query. Queries approved privacy-preserving HTTPS provider; explains egress NAT/VPN routing caveats; caches last-known response.

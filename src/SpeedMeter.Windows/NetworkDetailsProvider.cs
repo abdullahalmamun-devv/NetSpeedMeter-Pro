@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -171,6 +172,26 @@ public sealed unsafe class WindowsWlanQueryProvider : IWlanQueryProvider
     private const int WlanIntfOpcodeChannelNumber = 8;
     private const int WlanInterfaceStateConnected = 1;
 
+    public delegate uint CustomBssFetcher(nint clientHandle, in Guid adapterGuid, out nint pBssList);
+    private readonly CustomBssFetcher? customBssFetcher;
+
+    static WindowsWlanQueryProvider()
+    {
+        // Assert native struct layouts and offsets conform to Windows SDK wlanapi.h definitions
+        if (Marshal.SizeOf<WlanInterfaceInfo>() != 532) throw new PlatformNotSupportedException("WlanInterfaceInfo must be 532 bytes.");
+        if (Marshal.SizeOf<WlanConnectionAttributes>() != 604) throw new PlatformNotSupportedException("WlanConnectionAttributes must be 604 bytes.");
+        if (Marshal.OffsetOf<WlanConnectionAttributes>(nameof(WlanConnectionAttributes.AssociationAttributes)) != (nint)520) throw new PlatformNotSupportedException("AssociationAttributes offset must be 520.");
+        if (Marshal.OffsetOf<WlanConnectionAttributes>(nameof(WlanConnectionAttributes.SecurityAttributes)) != (nint)588) throw new PlatformNotSupportedException("SecurityAttributes offset must be 588.");
+        if (Marshal.SizeOf<WlanBssEntry>() != 360) throw new PlatformNotSupportedException("WlanBssEntry must be 360 bytes.");
+        if (Marshal.OffsetOf<WlanBssEntry>(nameof(WlanBssEntry.Dot11Bssid)) != (nint)40) throw new PlatformNotSupportedException("Dot11Bssid offset must be 40.");
+        if (Marshal.OffsetOf<WlanBssEntry>(nameof(WlanBssEntry.ChCenterFrequency)) != (nint)92) throw new PlatformNotSupportedException("ChCenterFrequency offset must be 92.");
+    }
+
+    public WindowsWlanQueryProvider(CustomBssFetcher? customBssFetcher = null)
+    {
+        this.customBssFetcher = customBssFetcher;
+    }
+
     public (string? Ssid, int? Signal, string? Band, int? Channel, string? Auth, string Limitation) QueryWifiDetails(Guid adapterGuid)
     {
         if (!OperatingSystem.IsWindows() || adapterGuid == Guid.Empty)
@@ -189,20 +210,18 @@ public sealed unsafe class WindowsWlanQueryProvider : IWlanQueryProvider
 
             try
             {
-                var numItems = *(uint*)pIfList;
+                var pIfHeader = (WlanInterfaceInfoListHeader*)pIfList;
+                var numItems = pIfHeader->NumberOfItems;
                 var found = false;
                 var isConnected = false;
 
-                // Each WLAN_INTERFACE_INFO is 532 bytes: Guid (16), Description (512), State (4)
                 for (uint i = 0; i < numItems; i++)
                 {
-                    var pInfo = (byte*)pIfList + 8 + (i * 532);
-                    var ifGuid = *(Guid*)pInfo;
-                    if (ifGuid == adapterGuid)
+                    var pInfo = (WlanInterfaceInfo*)((byte*)pIfList + 8 + (i * (uint)sizeof(WlanInterfaceInfo)));
+                    if (pInfo->InterfaceGuid == adapterGuid)
                     {
                         found = true;
-                        var state = *(int*)(pInfo + 528);
-                        isConnected = (state == WlanInterfaceStateConnected);
+                        isConnected = (pInfo->State == WlanInterfaceStateConnected);
                         break;
                     }
                 }
@@ -219,45 +238,39 @@ public sealed unsafe class WindowsWlanQueryProvider : IWlanQueryProvider
 
                 try
                 {
-                    // pData layout: WLAN_CONNECTION_ATTRIBUTES
-                    // 0: isState (4)
-                    // 4: wlanConnectionMode (4)
-                    // 8: strProfileName (512)
-                    // 520: WLAN_ASSOCIATION_ATTRIBUTES:
-                    //   520: dot11Ssid (uint length + 32 bytes = 36)
-                    //   556: dot11BssType (4)
-                    //   560: dot11Bssid (6)
-                    //   566: padding (2)
-                    //   568: dot11PhyType (4)
-                    //   572: uDot11PhyIndex (4)
-                    //   576: wlanSignalQuality (4)
-                    //   580: ulRxRate (4)
-                    //   584: ulTxRate (4)
-                    // 588: WLAN_SECURITY_ATTRIBUTES:
-                    //   588: bSecurityEnabled (4)
-                    //   592: bOneXEnabled (4)
-                    //   596: dot11AuthAlgorithm (4)
-                    //   600: dot11CipherAlgorithm (4)
+                    if (dataSize < (uint)sizeof(WlanConnectionAttributes))
+                        return (null, null, null, null, null, "WLAN connection attributes payload size smaller than expected.");
 
-                    var ssidLen = *(uint*)((byte*)pData + 520);
+                    var pConn = (WlanConnectionAttributes*)pData;
+                    ref var assoc = ref pConn->AssociationAttributes;
+
+                    var ssidLen = assoc.Dot11Ssid.Length;
                     string? ssid = null;
                     if (ssidLen is > 0 and <= 32)
                     {
                         var ssidBytes = new byte[ssidLen];
-                        Marshal.Copy((nint)((byte*)pData + 524), ssidBytes, 0, (int)ssidLen);
+                        fixed (byte* pBytes = assoc.Dot11Ssid.Bytes)
+                        {
+                            Marshal.Copy((nint)pBytes, ssidBytes, 0, (int)ssidLen);
+                        }
                         ssid = Encoding.UTF8.GetString(ssidBytes);
                     }
 
-                    int? signal = (int)*(uint*)((byte*)pData + 576);
+                    int? signal = (int)assoc.SignalQuality;
                     if (signal is < 0 or > 100) signal = null;
 
-                    var authAlgo = *(int*)((byte*)pData + 596);
-                    var auth = MapAuthAlgorithm(authAlgo);
+                    var auth = MapAuthAlgorithm(pConn->SecurityAttributes.Dot11AuthAlgorithm);
 
-                    // Read frequency/band and channel from BSS list with fallback to channel opcode
-                    var (band, channel) = ReadFrequencyAndChannel(clientHandle, adapterGuid, (byte*)pData + 560);
+                    var bssidBytes = new byte[6];
+                    fixed (byte* pBssid = assoc.Dot11Bssid)
+                    {
+                        Marshal.Copy((nint)pBssid, bssidBytes, 0, 6);
+                    }
 
-                    return (ssid, signal, band, channel, auth, "Wi-Fi connection metadata observed from Windows WLAN interface.");
+                    // Correlate frequency, band, and channel strictly to the connected BSSID
+                    var (band, channel, bssLimitation) = ReadFrequencyAndChannel(clientHandle, adapterGuid, bssidBytes);
+
+                    return (ssid, signal, band, channel, auth, bssLimitation);
                 }
                 finally
                 {
@@ -279,39 +292,21 @@ public sealed unsafe class WindowsWlanQueryProvider : IWlanQueryProvider
         }
     }
 
-    private static (string? Band, int? Channel) ReadFrequencyAndChannel(nint clientHandle, Guid adapterGuid, byte* bssidPtr)
+    private (string? Band, int? Channel, string Limitation) ReadFrequencyAndChannel(
+        nint clientHandle,
+        Guid adapterGuid,
+        ReadOnlySpan<byte> connectedBssid)
     {
-        uint frequencyKhz = 0;
-        int? channel = null;
+        int? fallbackChannel = null;
 
-        // Query BSS list to obtain actual center frequency
-        var bssRes = WlanGetNetworkBssList(clientHandle, in adapterGuid, 0, 1 /* infrastructure */, 0, 0, out var pBssList);
-        if (bssRes == 0 && pBssList != 0)
-        {
-            try
-            {
-                var numBss = *(uint*)((byte*)pBssList + 4);
-                if (numBss > 0)
-                {
-                    byte* curEntry = (byte*)pBssList + 8;
-                    frequencyKhz = *(uint*)(curEntry + 92);
-                }
-            }
-            catch { }
-            finally
-            {
-                WlanFreeMemory(pBssList);
-            }
-        }
-
-        // Also query channel number opcode directly
+        // Query channel opcode directly for authoritative channel number fallback
         var chRes = WlanQueryInterface(clientHandle, in adapterGuid, WlanIntfOpcodeChannelNumber, 0, out _, out var pChData, out _);
         if (chRes == 0 && pChData != 0)
         {
             try
             {
                 var ch = (int)*(uint*)pChData;
-                if (ch > 0) channel = ch;
+                if (ch > 0) fallbackChannel = ch;
             }
             finally
             {
@@ -319,30 +314,124 @@ public sealed unsafe class WindowsWlanQueryProvider : IWlanQueryProvider
             }
         }
 
-        // Determine frequency band strictly from actual frequency evidence
-        string? band;
-        if (frequencyKhz >= 2400000 && frequencyKhz <= 2500000)
+        // Query BSS list to obtain actual center frequency for the matching BSSID.
+        // Pass dot11_BSS_type_any (3) to ensure infrastructure and mesh BSSs are visible,
+        // and pDot11Ssid = 0 (null) so no visible BSS is excluded by SSID filtering.
+        uint bssRes;
+        nint pBssList;
+        if (customBssFetcher != null)
         {
-            band = "2.4 GHz";
-            channel ??= frequencyKhz == 2484000 ? 14 : (int)((frequencyKhz - 2407000) / 5000);
-        }
-        else if (frequencyKhz >= 4900000 && frequencyKhz < 5925000)
-        {
-            band = "5 GHz";
-            channel ??= (int)((frequencyKhz - 5000000) / 5000);
-        }
-        else if (frequencyKhz >= 5925000 && frequencyKhz <= 7200000)
-        {
-            band = "6 GHz";
-            channel ??= (int)((frequencyKhz - 5950000) / 5000);
+            bssRes = customBssFetcher(clientHandle, adapterGuid, out pBssList);
         }
         else
         {
-            // If frequency evidence is missing or ambiguous, show unavailable rather than guessing from channel
+            bssRes = WlanGetNetworkBssList(clientHandle, in adapterGuid, 0, 3 /* dot11_BSS_type_any */, 0, 0, out pBssList);
+        }
+
+        if (bssRes != 0 || pBssList == 0)
+        {
+            return ("Band unavailable", fallbackChannel, $"WLAN BSS list query failed (code {bssRes}).");
+        }
+
+        try
+        {
+            return CorrelateBssDetails(pBssList, connectedBssid, fallbackChannel);
+        }
+        finally
+        {
+            WlanFreeMemory(pBssList);
+        }
+    }
+
+    public static bool AreBssidsEqual(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
+    {
+        if (a.Length < 6 || b.Length < 6) return false;
+        return a[0] == b[0] &&
+               a[1] == b[1] &&
+               a[2] == b[2] &&
+               a[3] == b[3] &&
+               a[4] == b[4] &&
+               a[5] == b[5];
+    }
+
+    private static bool IsZeroMac(ReadOnlySpan<byte> mac)
+    {
+        for (int i = 0; i < 6; i++)
+        {
+            if (mac[i] != 0) return false;
+        }
+        return true;
+    }
+
+    public static (string? Band, int? Channel, string Limitation) CorrelateBssDetails(
+        nint pBssList,
+        ReadOnlySpan<byte> connectedBssid,
+        int? fallbackChannel = null)
+    {
+        if (connectedBssid.Length < 6 || IsZeroMac(connectedBssid))
+        {
+            return ("Band unavailable", fallbackChannel, "Active connection BSSID is unavailable or unassociated.");
+        }
+
+        if (pBssList == 0)
+        {
+            return ("Band unavailable", fallbackChannel, "WLAN BSS list query unavailable.");
+        }
+
+        var header = *(WlanBssListHeader*)pBssList;
+        if (header.NumberOfItems == 0)
+        {
+            return ("Band unavailable", fallbackChannel, "WLAN BSS list contains no visible access points.");
+        }
+
+        uint matchedFrequencyKhz = 0;
+        bool matched = false;
+
+        // Iterate through all BSS entries and find the exact matching BSSID.
+        // Never assume list ordering or choose the first visible entry.
+        for (uint i = 0; i < header.NumberOfItems; i++)
+        {
+            var pEntry = (WlanBssEntry*)((byte*)pBssList + 8 + (i * (uint)sizeof(WlanBssEntry)));
+            var entryBssid = new ReadOnlySpan<byte>(pEntry->Dot11Bssid, 6);
+            if (AreBssidsEqual(entryBssid, connectedBssid))
+            {
+                matchedFrequencyKhz = pEntry->ChCenterFrequency;
+                matched = true;
+                break;
+            }
+        }
+
+        if (!matched)
+        {
+            // Active connected BSSID was not present in the returned scan list.
+            // Under PRD truth rules, do not borrow frequency from another BSS.
+            return ("Band unavailable", fallbackChannel, "Active connection BSSID was not found in visible WLAN BSS list; band is unavailable.");
+        }
+
+        string band;
+        int? channel = fallbackChannel;
+
+        if (matchedFrequencyKhz >= 2400000 && matchedFrequencyKhz <= 2500000)
+        {
+            band = "2.4 GHz";
+            channel ??= matchedFrequencyKhz == 2484000 ? 14 : (int)((matchedFrequencyKhz - 2407000) / 5000);
+        }
+        else if (matchedFrequencyKhz >= 4900000 && matchedFrequencyKhz < 5925000)
+        {
+            band = "5 GHz";
+            channel ??= (int)((matchedFrequencyKhz - 5000000) / 5000);
+        }
+        else if (matchedFrequencyKhz >= 5925000 && matchedFrequencyKhz <= 7200000)
+        {
+            band = "6 GHz";
+            channel ??= (int)((matchedFrequencyKhz - 5950000) / 5000);
+        }
+        else
+        {
             band = "Band unavailable";
         }
 
-        return (band, channel);
+        return (band, channel, "Wi-Fi connection metadata observed from matching Windows WLAN BSS.");
     }
 
     private static string MapAuthAlgorithm(int algo) => algo switch
@@ -392,6 +481,95 @@ public sealed unsafe class WindowsWlanQueryProvider : IWlanQueryProvider
 
     [DllImport("wlanapi.dll", ExactSpelling = true)]
     private static extern void WlanFreeMemory(nint pMemory);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct WlanInterfaceInfo
+    {
+        public Guid InterfaceGuid;
+        public fixed char Description[256];
+        public int State;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WlanInterfaceInfoListHeader
+    {
+        public uint NumberOfItems;
+        public uint Index;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Dot11Ssid
+    {
+        public uint Length;
+        public fixed byte Bytes[32];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WlanAssociationAttributes
+    {
+        public Dot11Ssid Dot11Ssid;
+        public int Dot11BssType;
+        public fixed byte Dot11Bssid[6];
+        public int Dot11PhyType;
+        public uint Dot11PhyIndex;
+        public uint SignalQuality;
+        public uint RxRate;
+        public uint TxRate;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WlanSecurityAttributes
+    {
+        public int SecurityEnabled;
+        public int OneXEnabled;
+        public int Dot11AuthAlgorithm;
+        public int Dot11CipherAlgorithm;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct WlanConnectionAttributes
+    {
+        public int IsState;
+        public int WlanConnectionMode;
+        public fixed char ProfileName[256];
+        public WlanAssociationAttributes AssociationAttributes;
+        public WlanSecurityAttributes SecurityAttributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WlanRateSet
+    {
+        public uint RateSetLength;
+        public fixed ushort RateSet[126];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WlanBssEntry
+    {
+        public Dot11Ssid Dot11Ssid;
+        public uint PhyId;
+        public fixed byte Dot11Bssid[6];
+        public int Dot11BssType;
+        public int Dot11BssPhyType;
+        public int Rssi;
+        public uint LinkQuality;
+        public byte InRegDomain;
+        public ushort BeaconPeriod;
+        public ulong Timestamp;
+        public ulong HostTimestamp;
+        public ushort CapabilityInformation;
+        public uint ChCenterFrequency;
+        public WlanRateSet RateSet;
+        public uint IeOffset;
+        public uint IeSize;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WlanBssListHeader
+    {
+        public uint TotalSize;
+        public uint NumberOfItems;
+    }
 }
 
 public sealed class WindowsNetworkProfileNameProvider : INetworkProfileNameProvider
