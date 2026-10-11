@@ -129,8 +129,8 @@ try {
     $psiInstall = New-Object System.Diagnostics.ProcessStartInfo
     $psiInstall.FileName = $setupExe
     $psiInstall.Arguments = "-Silent -NoLaunch -Dir `"$drillDir`""
-    $psiInstall.UseShellExecute = false
-    $psiInstall.CreateNoWindow = true
+    $psiInstall.UseShellExecute = $false
+    $psiInstall.CreateNoWindow = $true
     $pInstall = [System.Diagnostics.Process]::Start($psiInstall)
     $pInstall.WaitForExit(30000)
     if ($pInstall.ExitCode -ne 0) {
@@ -152,8 +152,8 @@ try {
         $psiUninstall = New-Object System.Diagnostics.ProcessStartInfo
         $psiUninstall.FileName = $uninstallExe
         $psiUninstall.Arguments = "-Uninstall -Silent -Dir `"$drillDir`""
-        $psiUninstall.UseShellExecute = false
-        $psiUninstall.CreateNoWindow = true
+        $psiUninstall.UseShellExecute = $false
+        $psiUninstall.CreateNoWindow = $true
         $pUninstall = [System.Diagnostics.Process]::Start($psiUninstall)
         $pUninstall.WaitForExit(30000)
     }
