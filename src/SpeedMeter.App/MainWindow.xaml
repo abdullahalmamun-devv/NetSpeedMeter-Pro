@@ -1,0 +1,76 @@
+<Window x:Class="SpeedMeter.App.MainWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:local="clr-namespace:SpeedMeter.App"
+ Title="SpeedMeter Pro · Feasibility build" Width="1120" Height="770" MinWidth="800" MinHeight="560"
+ Background="#0E1520" Foreground="#EFF4FB" FontFamily="Segoe UI" WindowStartupLocation="CenterScreen">
+ <Grid>
+  <Grid.ColumnDefinitions><ColumnDefinition Width="190" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+  <Border Background="#121B28" Padding="22,30,16,20">
+   <DockPanel>
+    <StackPanel DockPanel.Dock="Bottom">
+     <TextBlock Text="P0 / BUILD 0.1" FontSize="11" Foreground="#87A0BF" Margin="0,0,0,8" />
+     <TextBlock Text="Local. Account-free.&#10;Real adapter counters." Foreground="{StaticResource MutedBrush}" FontSize="12" LineHeight="20" />
+    </StackPanel>
+    <StackPanel>
+     <TextBlock Text="SPEEDMETER" FontWeight="Bold" FontSize="17" />
+     <TextBlock Text="PRO" Foreground="#68B2FF" FontSize="12" Margin="0,5,0,36" />
+     <Border Background="#243750" CornerRadius="6" Padding="12"><TextBlock Text="Overview" FontWeight="SemiBold" /></Border>
+     <TextBlock Text="Live Traffic" Margin="12,20,0,0" Foreground="{StaticResource MutedBrush}" />
+     <TextBlock Text="On this screen" FontSize="11" Margin="12,4,0,16" Foreground="#7890AD" />
+     <TextBlock Text="Apps · V1.5" Margin="12,10,0,14" Foreground="#7890AD" />
+     <TextBlock Text="Usage &amp; History · next" Margin="12,10,0,14" Foreground="#7890AD" FontSize="12" />
+     <TextBlock Text="Network Tools · planned" Margin="12,10,0,14" Foreground="#7890AD" FontSize="12" />
+    </StackPanel>
+   </DockPanel>
+  </Border>
+  <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+   <StackPanel Margin="30,26,30,26">
+    <DockPanel Margin="0,0,0,24">
+     <Button DockPanel.Dock="Right" Content="Show widget" Click="ShowWidget" VerticalAlignment="Center" Margin="18,0,0,0" />
+     <StackPanel><TextBlock Text="Your connection, at a glance." FontSize="26" FontWeight="SemiBold" TextWrapping="Wrap" />
+      <TextBlock Text="Live activity from one explicitly selected adapter." Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap" /></StackPanel>
+    </DockPanel>
+    <Border Background="{StaticResource PanelBrush}" CornerRadius="8" Padding="16" Margin="0,0,0,18">
+     <StackPanel>
+      <TextBlock Text="MEASUREMENT SCOPE" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8" />
+      <DockPanel><Button DockPanel.Dock="Right" Content="Refresh" Click="RefreshAdapters" Margin="10,0,0,0" />
+       <ComboBox x:Name="AdapterPicker" DisplayMemberPath="Label" SelectionChanged="AdapterChanged" AutomationProperties.Name="Measurement adapter" /></DockPanel>
+      <TextBlock x:Name="ScopeDescription" Text="Select your Wi-Fi or Ethernet adapter. VPN and physical counters are never added together." TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="0,9,0,0" />
+     </StackPanel>
+    </Border>
+    <Grid Margin="0,0,0,18">
+     <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="14" /><ColumnDefinition /></Grid.ColumnDefinitions>
+     <Border Background="{StaticResource PanelBrush}" CornerRadius="8" Padding="22">
+      <StackPanel><TextBlock Text="↓  DOWNLOAD" Foreground="#79B9FF" FontSize="12" FontWeight="SemiBold" />
+       <TextBlock x:Name="DownloadValue" Text="—" FontSize="34" FontWeight="SemiBold" Margin="0,10,0,6" AutomationProperties.Name="Download rate" />
+       <TextBlock x:Name="ReceivedValue" Text="Session received · 0 B" Foreground="{StaticResource MutedBrush}" FontSize="12" /></StackPanel>
+     </Border>
+     <Border Grid.Column="2" Background="{StaticResource PanelBrush}" CornerRadius="8" Padding="22">
+      <StackPanel><TextBlock Text="↑  UPLOAD" Foreground="#72DBC8" FontSize="12" FontWeight="SemiBold" />
+       <TextBlock x:Name="UploadValue" Text="—" FontSize="34" FontWeight="SemiBold" Margin="0,10,0,6" AutomationProperties.Name="Upload rate" />
+       <TextBlock x:Name="SentValue" Text="Session sent · 0 B" Foreground="{StaticResource MutedBrush}" FontSize="12" /></StackPanel>
+     </Border>
+    </Grid>
+    <Border Background="{StaticResource PanelBrush}" CornerRadius="8" Padding="20" Margin="0,0,0,18">
+     <StackPanel>
+      <DockPanel><TextBlock DockPanel.Dock="Right" Text="LAST 60 SECONDS" FontSize="11" Foreground="{StaticResource MutedBrush}" /><TextBlock Text="Live traffic" FontWeight="SemiBold" FontSize="16" /></DockPanel>
+      <local:TrafficChart x:Name="Chart" Height="154" Margin="0,16,0,12" AutomationProperties.Name="Live traffic graph. Current values and session totals are shown as text above." />
+      <TextBlock x:Name="StatusText" Text="Choose an adapter to begin." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" AutomationProperties.LiveSetting="Polite" />
+     </StackPanel>
+    </Border>
+    <WrapPanel Margin="0,0,0,14">
+     <Button x:Name="PauseButton" Content="Pause" Click="TogglePause" />
+     <Button Content="Reset session" Click="ResetSession" />
+     <Button x:Name="UnitsButton" Content="Units: bytes/s" Click="ToggleUnits" />
+     <ComboBox x:Name="IntervalPicker" Width="110" SelectedIndex="1" SelectionChanged="IntervalChanged" AutomationProperties.Name="Sampling interval">
+      <ComboBoxItem Content="0.5 seconds" /><ComboBoxItem Content="1 second" /><ComboBoxItem Content="2 seconds" />
+     </ComboBox>
+    </WrapPanel>
+    <TextBlock x:Name="CoverageText" Text="Session coverage begins with the first valid interval." FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8" />
+    <TextBlock Text="Prototype: session data stays in memory. History, quotas, automatic route selection and docked taskbar placement are not implemented yet. Connection probes are off." TextWrapping="Wrap" Foreground="#8CA2BD" FontSize="12" LineHeight="19" />
+    <Button Content="Quit SpeedMeter Pro" Click="QuitClick" HorizontalAlignment="Left" Background="Transparent" Margin="0,18,0,0" />
+   </StackPanel>
+  </ScrollViewer>
+ </Grid>
+</Window>

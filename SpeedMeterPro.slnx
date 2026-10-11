@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SpeedMeter.Core/SpeedMeter.Core.csproj" />
+    <Project Path="src/SpeedMeter.Storage/SpeedMeter.Storage.csproj" />
+    <Project Path="src/SpeedMeter.Application/SpeedMeter.Application.csproj" />
+    <Project Path="src/SpeedMeter.Windows/SpeedMeter.Windows.csproj" />
+    <Project Path="src/SpeedMeter.App/SpeedMeter.App.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SpeedMeter.Checks/SpeedMeter.Checks.csproj" />
+  </Folder>
+</Solution>
