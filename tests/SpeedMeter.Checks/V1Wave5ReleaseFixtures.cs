@@ -18,6 +18,68 @@ namespace SpeedMeter.Checks;
 
 internal static class V1Wave5ReleaseFixtures
 {
+    private const string DevelopmentTestManifestPrivateKeyPem =
+"""
+-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC5z80laEsugKgD
+Fu0fzo5309iGBOX6/kQV2vq5bAIvb7q3aNtdna5JU9oS9+bsnIdBb47mMjPnAlG4
+gZjuXav0l86GdzItF207b9YWMezwYoP+FZu75fZQ4Gn47UCbh7Raj48BTYz2uVIS
+FvEQyAQ0mLR2UZzBxDBnMn+FS1/wLVu/GBeClPmqSRxf+bkGNF/TNYHjozXWbSRA
+g9zAw6k9SIAVpBj0eeoxQ6+DkoTQmGvf0tHZ9M4lG8QqbBddDNDXrEXi1cWySrVU
+gCP+3A2OpBoaTMEIYNzeN4PJlWO4h9RSYgiPFCujKJDjIsGWJcWH+Ur1AdV5PvhH
+e+UdTpMlAgMBAAECggEAQA5cOZYfvPNLeG0x5/IseTDGB0WvBv0a+bHZF40dn77T
+zqDOZxKR3+ORXVKrAEzh7/QGfmM2M2BATewXja0rN5IR95cl7BeUZ5YhZttlRGWh
+/TjzzC314WHMBq27xSJeUY4GDbvvaarvmR7hkhhyIrO2Gsf902rQCPOGtKwMcd6J
+1/577YzLsY0HsPBvjfJrjChOUP8eUyGMD1wzLPgMyrnOUOKUj27tir70A+W+Ugqi
+U0G69ReiUVxP2rnzfGtsjnaoJOmgIwv7LtdZz80jV6VAw+w1Nk1K9ZtsdsUB+o7k
+oPE5zleIVt/GTF0tLom8txWLDU/j1fA6yEDurI7XzQKBgQD0PzbH28SKlpRmvaIG
+5LpYudwZPOdwE7S5zJxsX6RtDSiDYdRW3KLNRn0V71/EzNxuFQtRiV6eQb7+ou5y
+Gt+K9G3PIPtXnNp5aFWtrUxnXfFC7ZXIB8knhsll/68v++YTZgoO3EP8as0VLb87
+rdvzOG+bA2nCn21sT3tTWK7ouwKBgQDCwL79l7DFwThCTuODmgETXSfAULzvmlxq
+8OdxudFtoJ+EM4j9y7O/1kuPVmEdInyuZb2bXR+R8jixAixSKhxmyF1VdeHCtPoM
+uy0YSu7fb8VuERzkmdCzNmKAV9BextTGVHcggwnCtd5xv0CsmxSKYka7L4eV31vP
+YeSjswslnwKBgQDs1JrOoidqZmYRVVFVs9WJEPb9NdQIFeOIwYDviLHL2BVvh524
+eAoYV4AUk95d2nLm/trRvgyUEZYcHGpvE+WsPCR50jZEluA1Ftj1JfPOywWUawFw
+SzReclC46Xq6YVuPdcLM9AGsMPcY0Rn7yTJcHV4ChgW35JTakBs6DuTS3wKBgQCn
+e2rEWzdCWbAwFffCrSZPqMUOtmBFDdJ8hUAEpXBdfsyvvEILQKsMRxYj5n0NuSLQ
+N96fRa5orI3ka6IB5wUVvynE3OORtmFzoWReh9J1hIGc7kqSrVS1Sgfbp6kiWIuT
+JABujUJPmGf8GiVcSuGXQHzjbTSExtkFt4IQ5WCosQKBgDsZa1Z0WisJMp5x6Dzy
+F35v65BiTj9X5pKdqX1zraGifig8rKoYWvEgoiwqCpNCDnq+B3lPInpw1NiiluOh
+vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
+/6EYSW/D1TpeAmGyEm2Aa+q5
+-----END PRIVATE KEY-----
+""";
+
+    private static RSA GetDevTestSigningKey()
+    {
+        var rsa = RSA.Create();
+        rsa.ImportFromPem(DevelopmentTestManifestPrivateKeyPem);
+        return rsa;
+    }
+
+    public static int? TryRunChild(string[] args)
+    {
+        if (args.Length >= 3 && args[0] == "--run-shutdown-harness")
+        {
+            var userSid = args[1];
+            var mode = args[2];
+            var eventName = @"Local\SpeedMeterPro.Shutdown." + userSid;
+
+            if (mode == "cooperative")
+            {
+                using var evt = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
+                var signaled = evt.WaitOne(TimeSpan.FromSeconds(10));
+                return signaled ? 0 : 2;
+            }
+            else if (mode == "stubborn")
+            {
+                Thread.Sleep(TimeSpan.FromSeconds(10));
+                return 0;
+            }
+        }
+        return null;
+    }
+
     public static void Run(Action<string, Action> check)
     {
         check("W5-REL: Canonical version model matches across ProductIdentity and Assembly", CanonicalVersionIdentityConformity);
@@ -36,6 +98,7 @@ internal static class V1Wave5ReleaseFixtures
         check("W5-REL: Installer graceful shutdown handshake coordinates clean exit and refuses destructive force-kill", InstallerGracefulShutdownHandshakeDrill);
         check("W5-REL: Installer transactional staging rolls back atomically to previous version on interrupted upgrade", InstallerTransactionalInstallAndRollbackDrill);
         check("W5-REL: Installer fresh install and upgrade preserve user data while uninstall purge cleans all traces", InstallerFreshInstallUpgradeAndUninstallDrill);
+        check("W5-REL: End-to-end update package verification pipeline enforces all stages atomically", EndToEndUpdatePackageVerificationPipelineDrill);
     }
 
     private static void CanonicalVersionIdentityConformity()
@@ -121,30 +184,30 @@ internal static class V1Wave5ReleaseFixtures
 
     private static void TamperedManifestRejection()
     {
-        using var rsa = RSA.Create(2048);
+        using var devKey = GetDevTestSigningKey();
         var manifest = new UpdateManifest(
             1, "SpeedMeterPro", "rc", "1.0.0-rc.1", DateTimeOffset.UtcNow, "1.0.0-rc.1",
             "https://updates.test/setup.exe", "4a1c4f727dc9c0bb35bfe041df248955ab574b5b4a1c4f727dc9c0bb35bfe041",
             75000000, 3, "https://updates.test/notes.html", "SpeedMeter Pro Project", "");
 
         var canonicalBytes = UpdateVerificationService.GetCanonicalManifestBytes(manifest);
-        var signature = rsa.SignData(canonicalBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var signature = devKey.SignData(canonicalBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         var signedManifest = manifest with { Signature = Convert.ToBase64String(signature) };
 
-        // Valid signature passes
-        var valid = UpdateVerificationService.VerifyManifestSignature(signedManifest, canonicalBytes, rsa);
-        Require(valid, "Legitimate manifest signature failed verification.");
+        // Valid signature passes against pinned DevelopmentTest trust anchor
+        var valid = UpdateVerificationService.VerifyManifestSignature(signedManifest, canonicalBytes, SigningTrustMode.DevelopmentTest);
+        Require(valid, "Legitimate manifest signature failed verification against pinned DevelopmentTest trust anchor.");
 
         // Tampered canonical payload fails
         var tamperedManifest = signedManifest with { PackageUrl = "https://updates.test/MALICIOUS.exe" };
         var tamperedBytes = UpdateVerificationService.GetCanonicalManifestBytes(tamperedManifest);
-        var invalid = UpdateVerificationService.VerifyManifestSignature(tamperedManifest, tamperedBytes, rsa);
+        var invalid = UpdateVerificationService.VerifyManifestSignature(tamperedManifest, tamperedBytes, SigningTrustMode.DevelopmentTest);
         Require(!invalid, "Tampered manifest payload must fail signature verification.");
     }
 
     private static void ManifestTrustAnchorTamperingDrill()
     {
-        // Attacker creates their own keypair and signs a malicious manifest
+        // 1. Attacker creates their own keypair and signs a malicious manifest
         using var attackerKey = RSA.Create(2048);
         var maliciousManifest = new UpdateManifest(
             1, "SpeedMeterPro", "rc", "1.0.0-rc.2", DateTimeOffset.UtcNow, "1.0.0-rc.1",
@@ -155,9 +218,24 @@ internal static class V1Wave5ReleaseFixtures
         var maliciousSig = attackerKey.SignData(maliciousBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         var signedMaliciousManifest = maliciousManifest with { Signature = Convert.ToBase64String(maliciousSig) };
 
-        // Verification using application Trust Anchor must reject attacker key
-        var passedTrustAnchor = UpdateVerificationService.VerifyManifestSignature(signedMaliciousManifest, maliciousBytes, customPublicKey: null);
-        Require(!passedTrustAnchor, "Manifest signed by untrusted attacker key must fail Trust Anchor verification.");
+        // Verification using application Trust Anchor must reject attacker key in both DevelopmentTest and Production modes
+        var passedInDev = UpdateVerificationService.VerifyManifestSignature(signedMaliciousManifest, maliciousBytes, SigningTrustMode.DevelopmentTest);
+        Require(!passedInDev, "Manifest signed by untrusted attacker key must fail DevelopmentTest Trust Anchor verification.");
+
+        var passedInProd = UpdateVerificationService.VerifyManifestSignature(signedMaliciousManifest, maliciousBytes, SigningTrustMode.Production);
+        Require(!passedInProd, "Manifest signed by untrusted attacker key must fail Production Trust Anchor verification.");
+
+        // 2. Test-signed manifest must FAIL against Production Trust Anchor (strict key separation)
+        using var devKey = GetDevTestSigningKey();
+        var legitimateSig = devKey.SignData(maliciousBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var devSignedManifest = maliciousManifest with { Signature = Convert.ToBase64String(legitimateSig) };
+
+        var passedCrossMode = UpdateVerificationService.VerifyManifestSignature(devSignedManifest, maliciousBytes, SigningTrustMode.Production);
+        Require(!passedCrossMode, "Test-signed manifest must be rejected by Production Trust Anchor.");
+
+        // 3. Test-signed manifest SUCCEEDS against DevelopmentTest Trust Anchor
+        var passedDevMode = UpdateVerificationService.VerifyManifestSignature(devSignedManifest, maliciousBytes, SigningTrustMode.DevelopmentTest);
+        Require(passedDevMode, "Test-signed manifest must succeed against DevelopmentTest Trust Anchor.");
     }
 
     private static void TamperedPackagePayloadRejection()
@@ -356,37 +434,83 @@ internal static class V1Wave5ReleaseFixtures
 
     private static void AuthenticodePublisherEnforcementDrill()
     {
-        var tempFile = Path.Combine(Path.GetTempPath(), $"speedmeter_auth_{Guid.NewGuid():N}.exe");
-        File.WriteAllBytes(tempFile, new byte[] { 0x4D, 0x5A, 0x90, 0x00 }); // MZ header stub
+        var tempDir = Path.Combine(Path.GetTempPath(), $"speedmeter_auth_drill_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
         try
         {
-            // 1. Unsigned binary throws SecurityException
+            var signedPe = GetOrCreateTestSignedPe(tempDir);
+            Require(File.Exists(signedPe), "Signed test PE was not located or generated.");
+
+            // 1. Valid test PE passes WinVerifyTrust and publisher check in DevelopmentTest mode
+            UpdateVerificationService.VerifyStagedPayloadAuthenticode(signedPe, SigningTrustMode.DevelopmentTest);
+
+            // 2. In Production mode, test-signed PE fails chain verification (Untrusted root)
+            var threwProdUntrusted = false;
+            try
+            {
+                UpdateVerificationService.VerifyStagedPayloadAuthenticode(signedPe, SigningTrustMode.Production);
+            }
+            catch (SecurityException ex)
+            {
+                threwProdUntrusted = true;
+                Require(ex.Message.Contains("chain validation failed") || ex.Message.Contains("trust verification failed") || ex.Message.Contains("0x800B0109") || ex.Message.Contains("Untrusted"),
+                    $"Expected production untrusted root rejection, got: {ex.Message}");
+            }
+            Require(threwProdUntrusted, "Test-signed binary must be rejected in Production mode.");
+
+            // 3. Tampered PE: flip bits in executable -> WinVerifyTrust MUST return TRUST_E_BAD_DIGEST (0x80096010)
+            var tamperedPe = Path.Combine(tempDir, "tampered_payload.exe");
+            File.Copy(signedPe, tamperedPe, overwrite: true);
+            var peBytes = File.ReadAllBytes(tamperedPe);
+            var tamperOffset = peBytes.Length > 0x2000 ? 0x1000 : peBytes.Length / 2;
+            peBytes[tamperOffset] ^= 0xFF;
+            File.WriteAllBytes(tamperedPe, peBytes);
+
+            var threwTampered = false;
+            try
+            {
+                UpdateVerificationService.VerifyStagedPayloadAuthenticode(tamperedPe, SigningTrustMode.DevelopmentTest);
+            }
+            catch (SecurityException ex)
+            {
+                threwTampered = true;
+                Require(ex.Message.Contains("TRUST_E_BAD_DIGEST") || ex.Message.Contains("0x80096010"),
+                    $"Expected TRUST_E_BAD_DIGEST exception, got: {ex.Message}");
+            }
+            Require(threwTampered, "Tampered binary must be rejected with TRUST_E_BAD_DIGEST.");
+
+            // 4. Publisher mismatch check
+            var threwPublisherMismatch = false;
+            try
+            {
+                UpdateVerificationService.VerifyStagedPayloadAuthenticode(signedPe, SigningTrustMode.DevelopmentTest, expectedPublisher: "Evil Corporation Inc");
+            }
+            catch (SecurityException ex)
+            {
+                threwPublisherMismatch = true;
+                Require(ex.Message.Contains("publisher mismatch"), $"Expected publisher mismatch, got: {ex.Message}");
+            }
+            Require(threwPublisherMismatch, "Publisher mismatch must be rejected.");
+
+            // 5. Unsigned executable throws TRUST_E_NOSIGNATURE (0x800B0100)
+            var unsignedFile = Path.Combine(tempDir, "unsigned_file.exe");
+            File.WriteAllBytes(unsignedFile, new byte[] { 0x4D, 0x5A, 0x90, 0x00 });
             var threwUnsigned = false;
             try
             {
-                UpdateVerificationService.VerifyStagedPayloadAuthenticode(tempFile, SigningTrustMode.Production);
+                UpdateVerificationService.VerifyStagedPayloadAuthenticode(unsignedFile, SigningTrustMode.DevelopmentTest);
             }
-            catch (SecurityException)
+            catch (SecurityException ex)
             {
                 threwUnsigned = true;
+                Require(ex.Message.Contains("TRUST_E_NOSIGNATURE") || ex.Message.Contains("0x800B0100") || ex.Message.Contains("missing"),
+                    $"Expected unsigned rejection, got: {ex.Message}");
             }
-            Require(threwUnsigned, "Unsigned binary must be rejected by Authenticode verification.");
-
-            // 2. Mismatched publisher check
-            var threwPublisher = false;
-            try
-            {
-                UpdateVerificationService.VerifyStagedPayloadAuthenticode(tempFile, SigningTrustMode.DevelopmentTest, expectedPublisher: "Evil Corporation");
-            }
-            catch (SecurityException)
-            {
-                threwPublisher = true;
-            }
-            Require(threwPublisher, "Publisher mismatch must be rejected.");
+            Require(threwUnsigned, "Unsigned binary must be rejected.");
         }
         finally
         {
-            try { File.Delete(tempFile); } catch { }
+            try { Directory.Delete(tempDir, true); } catch { }
         }
     }
 
@@ -455,8 +579,8 @@ internal static class V1Wave5ReleaseFixtures
         context.DisposeWithTimeout(TimeSpan.FromSeconds(3.0));
         sw.Stop();
 
-        // Must complete in approximately 3.0s, NOT hang for 10s
-        Require(sw.ElapsedMilliseconds < 5000, $"Shutdown exceeded timeout: {sw.ElapsedMilliseconds} ms.");
+        // Must complete in approximately 3.0s (contract 3.0s + 500ms scheduler tolerance)
+        Require(sw.ElapsedMilliseconds <= 3500, $"Shutdown exceeded tolerance (contract 3.0s + 500ms scheduler tolerance): {sw.ElapsedMilliseconds} ms.");
         Require(diagnosticLogged is not null && diagnosticLogged.Contains("Whole-application shutdown barrier exceeded"),
             "Shutdown barrier failure diagnostic was not logged.");
     }
@@ -464,26 +588,68 @@ internal static class V1Wave5ReleaseFixtures
     private static void InstallerGracefulShutdownHandshakeDrill()
     {
         var testSid = "drill_user_" + Guid.NewGuid().ToString("N");
-        var eventName = @"Local\SpeedMeterPro.Shutdown." + testSid;
-
-        // 1. Cooperative process simulation: listens for event and sets flag
-        var shutdownSignaled = false;
-        using var shutdownEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
-        var waitRegistered = ThreadPool.RegisterWaitForSingleObject(shutdownEvent, (state, timedOut) =>
-        {
-            if (!timedOut) shutdownSignaled = true;
-        }, null, -1, false);
+        var currentExe = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
+        Require(!string.IsNullOrWhiteSpace(currentExe) && File.Exists(currentExe), "Current test executable path not found.");
+        var processName = Path.GetFileNameWithoutExtension(currentExe);
+        var repoRoot = FindRepoRoot();
+        var localDotnet = Path.Combine(repoRoot, ".tools", "dotnet");
+        var dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT")
+            ?? (Directory.Exists(localDotnet) ? localDotnet : null);
 
         try
         {
-            var exited = InstallerEngine.RequestGracefulShutdown(testSid, TimeSpan.FromSeconds(1));
-            // No actual process named SpeedMeter.App was running, returns true immediately
-            Require(exited, "Graceful shutdown should succeed when no process running.");
-            Require(!shutdownSignaled, "Shutdown should not have been signaled to nonexistent process.");
+            // Case 1: Cooperative Process Handshake
+            var psiCoop = new ProcessStartInfo(currentExe!, $"--run-shutdown-harness {testSid} cooperative")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            if (!string.IsNullOrEmpty(dotnetRoot))
+            {
+                psiCoop.Environment["DOTNET_ROOT"] = dotnetRoot;
+                psiCoop.Environment["DOTNET_ROOT_X64"] = dotnetRoot;
+            }
+
+            using (var procCoop = Process.Start(psiCoop))
+            {
+                Require(procCoop != null, "Failed to launch cooperative child harness.");
+                Thread.Sleep(300); // Allow child to start and listen
+
+                var exited = InstallerEngine.RequestGracefulShutdown(testSid, TimeSpan.FromSeconds(5), null, processName!);
+                Require(exited, "Installer graceful shutdown handshake failed for cooperative process.");
+                if (!procCoop!.HasExited) procCoop.WaitForExit(2000);
+                Require(procCoop.HasExited, "Cooperative process did not exit.");
+                Require(procCoop.ExitCode == 0, $"Cooperative process exited with non-zero code {procCoop.ExitCode}.");
+            }
+
+            // Case 2: Stubborn Refusal (Installer bounded wait respects timeout and refuses destructive force-kill)
+            var psiStubborn = new ProcessStartInfo(currentExe!, $"--run-shutdown-harness {testSid} stubborn")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            if (!string.IsNullOrEmpty(dotnetRoot))
+            {
+                psiStubborn.Environment["DOTNET_ROOT"] = dotnetRoot;
+                psiStubborn.Environment["DOTNET_ROOT_X64"] = dotnetRoot;
+            }
+
+            using (var procStubborn = Process.Start(psiStubborn))
+            {
+                Require(procStubborn != null, "Failed to launch stubborn child harness.");
+                Thread.Sleep(300); // Allow child to start
+
+                var exited = InstallerEngine.RequestGracefulShutdown(testSid, TimeSpan.FromSeconds(1), null, processName!);
+                Require(!exited, "Installer graceful shutdown must return false and refuse force-kill when stubborn process refuses to close.");
+                Require(!procStubborn!.HasExited, "Stubborn process must NOT be force-killed by graceful shutdown handshake.");
+
+                // Clean up stubborn process
+                try { procStubborn.Kill(); procStubborn.WaitForExit(1000); } catch { }
+            }
         }
-        finally
+        catch
         {
-            waitRegistered.Unregister(null);
+            throw;
         }
     }
 
@@ -585,6 +751,165 @@ internal static class V1Wave5ReleaseFixtures
         InstallerEngine.UninstallAsync(uninstallPurge).GetAwaiter().GetResult();
 
         try { Directory.Delete(tempDir, true); } catch { }
+    }
+
+    private static string FindRepoRoot()
+    {
+        var dir = AppContext.BaseDirectory;
+        while (!string.IsNullOrEmpty(dir))
+        {
+            if (File.Exists(Path.Combine(dir, "SpeedMeter.sln")) || Directory.Exists(Path.Combine(dir, ".git")))
+                return dir;
+            dir = Path.GetDirectoryName(dir);
+        }
+        return AppContext.BaseDirectory;
+    }
+
+    private static string GetOrCreateTestSignedPe(string tempDir)
+    {
+        var targetFile = Path.Combine(tempDir, "signed_test_pe.exe");
+        var repoRoot = FindRepoRoot();
+
+        // First check known signed PEs in the repository
+        var candidatePaths = new[]
+        {
+            Path.Combine(repoRoot, "artifacts", "release", "SpeedMeterPro-1.0.0-rc.1-win-x64", "SpeedMeter.App.exe"),
+            Path.Combine(repoRoot, "artifacts", "release", "SpeedMeterPro-1.0.0-rc.1-Setup.exe"),
+            Path.Combine(AppContext.BaseDirectory, "SpeedMeter.App.exe"),
+            Path.Combine(AppContext.BaseDirectory, "SpeedMeterPro-Setup.exe")
+        };
+
+        foreach (var path in candidatePaths)
+        {
+            var fullPath = Path.GetFullPath(path);
+            if (File.Exists(fullPath))
+            {
+                try
+                {
+#pragma warning disable SYSLIB0057
+                    var sig = System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(fullPath);
+#pragma warning restore SYSLIB0057
+                    if (sig != null && sig.Subject.Contains("SpeedMeter Pro"))
+                    {
+                        File.Copy(fullPath, targetFile, overwrite: true);
+                        return targetFile;
+                    }
+                }
+                catch { }
+            }
+        }
+
+        // If none found on disk, use PowerShell script file to sign a stub
+        var currentExe = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
+        if (!string.IsNullOrWhiteSpace(currentExe) && File.Exists(currentExe))
+        {
+            File.Copy(currentExe, targetFile, overwrite: true);
+            var scriptPath = Path.Combine(tempDir, "sign_stub.ps1");
+            var scriptContent = $@"
+$cert = Get-ChildItem -Path Cert:\CurrentUser\My -CodeSigningCert | Where-Object {{ $_.Subject -like '*SpeedMeter Pro*' }} | Select-Object -First 1
+if ($cert) {{
+    Set-AuthenticodeSignature -FilePath '{targetFile.Replace("'", "''")}' -Certificate $cert -HashAlgorithm SHA256
+}}
+";
+            File.WriteAllText(scriptPath, scriptContent);
+            var psi = new ProcessStartInfo("powershell", $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\"")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = Process.Start(psi);
+            proc?.WaitForExit(10000);
+            try { File.Delete(scriptPath); } catch { }
+        }
+
+        return targetFile;
+    }
+
+    private static void EndToEndUpdatePackageVerificationPipelineDrill()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"speedmeter_e2e_update_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var signedPe = GetOrCreateTestSignedPe(tempDir);
+            Require(File.Exists(signedPe), "Signed test PE was not located or generated.");
+
+            using var fs = File.OpenRead(signedPe);
+            var fileSha256 = UpdateVerificationService.ComputeSha256(fs);
+            var fileLength = new FileInfo(signedPe).Length;
+
+            using var devKey = GetDevTestSigningKey();
+            var manifest = new UpdateManifest(
+                SchemaVersion: 1,
+                Product: "SpeedMeterPro",
+                Channel: "rc",
+                Version: "1.0.0-rc.1",
+                BuildDateUtc: DateTimeOffset.UtcNow,
+                MinSupportedVersion: "1.0.0-rc.1",
+                PackageUrl: "https://updates.speedmeterpro.local/releases/pkg.exe",
+                PackageSha256: fileSha256,
+                PackageSizeBytes: fileLength,
+                TargetDbSchemaVersion: 3,
+                ReleaseNotesUrl: "https://updates.speedmeterpro.local/notes/v1.0.0.html",
+                Publisher: UpdateTrustAnchor.ExpectedPublisher,
+                Signature: ""
+            );
+
+            var canonicalBytes = UpdateVerificationService.GetCanonicalManifestBytes(manifest);
+            var sig = devKey.SignData(canonicalBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            var signedManifest = manifest with { Signature = Convert.ToBase64String(sig) };
+            var manifestJson = System.Text.Json.JsonSerializer.Serialize(signedManifest);
+
+            // 1. Valid package verification pipeline succeeds in DevelopmentTest mode
+            UpdateVerificationService.VerifyUpdatePackage(
+                manifestJson,
+                signedPe,
+                SigningTrustMode.DevelopmentTest,
+                currentDatabaseVersion: 3,
+                applicationSupportedVersion: 3);
+
+            // 2. Incompatible database version fails downgrade check
+            var threwDowngrade = false;
+            try
+            {
+                UpdateVerificationService.VerifyUpdatePackage(
+                    manifestJson,
+                    signedPe,
+                    SigningTrustMode.DevelopmentTest,
+                    currentDatabaseVersion: 4,
+                    applicationSupportedVersion: 3);
+            }
+            catch (IncompatibleSchemaDowngradeException)
+            {
+                threwDowngrade = true;
+            }
+            Require(threwDowngrade, "VerifyUpdatePackage must enforce downgrade prevention.");
+
+            // 3. Bad hash fails payload check
+            var badHashManifest = signedManifest with { PackageSha256 = new string('0', 64) };
+            var badHashCanonical = UpdateVerificationService.GetCanonicalManifestBytes(badHashManifest);
+            var badHashSig = devKey.SignData(badHashCanonical, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            var signedBadHash = badHashManifest with { Signature = Convert.ToBase64String(badHashSig) };
+            var badHashJson = System.Text.Json.JsonSerializer.Serialize(signedBadHash);
+
+            var threwBadHash = false;
+            try
+            {
+                UpdateVerificationService.VerifyUpdatePackage(
+                    badHashJson,
+                    signedPe,
+                    SigningTrustMode.DevelopmentTest);
+            }
+            catch (SecurityException)
+            {
+                threwBadHash = true;
+            }
+            Require(threwBadHash, "VerifyUpdatePackage must reject mismatched package SHA-256.");
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
     }
 
     private static void Require(bool condition, string message)

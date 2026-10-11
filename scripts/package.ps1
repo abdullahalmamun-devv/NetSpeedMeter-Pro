@@ -79,8 +79,8 @@ if ($running) {
         }
     } catch { }
 
-    $deadline = (Get-Date).AddSeconds(5)
-    while ((Get-Date) -lt $deadline) {
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($sw.ElapsedMilliseconds -lt 5000) {
         $active = Get-Process -Name 'SpeedMeter.App' -ErrorAction SilentlyContinue
         if (-not $active) { break }
         Start-Sleep -Milliseconds 250
@@ -216,8 +216,8 @@ if ($running) {
         }
     } catch { }
 
-    $deadline = (Get-Date).AddSeconds(5)
-    while ((Get-Date) -lt $deadline) {
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($sw.ElapsedMilliseconds -lt 5000) {
         $active = Get-Process -Name 'SpeedMeter.App' -ErrorAction SilentlyContinue
         if (-not $active) { break }
         Start-Sleep -Milliseconds 250
@@ -289,20 +289,32 @@ SpeedMeter Pro 1.0.0-rc.1 (Release Candidate)
 Precision Network Performance Monitor for Windows 10/11 x64.
 Standard-user desktop application with zero cloud dependencies and zero accounts.
 
-INSTALLATION:
--------------
-1. Run SpeedMeterPro-1.0.0-rc.1-Setup.exe (Primary signed installer):
+DISTRIBUTION NOTICE (ADR-012):
+------------------------------
+SpeedMeter Pro is distributed primarily as a standalone canonical installer
+(SpeedMeterPro-1.0.0-rc.1-Setup.exe).
+
+ZIP archives are non-public secondary diagnostic/enterprise archives intended
+strictly for administrative evaluation, testing, and managed enterprise deployment.
+They are NOT supported public portable consumer distributions.
+
+INSTALLATION & DEPLOYMENT:
+--------------------------
+1. Standalone Canonical Installer (Primary):
+   Run SpeedMeterPro-1.0.0-rc.1-Setup.exe
    Interactive GUI setup or silent command line:
    SpeedMeterPro-1.0.0-rc.1-Setup.exe /S
 
-2. Or run Install.ps1 with PowerShell from this portable archive:
+2. Enterprise / Scripted Deployment:
+   Run Install.ps1 with PowerShell from this diagnostic archive:
    powershell.exe -ExecutionPolicy Bypass -File .\Install.ps1
 
    Options:
    -LaunchAfterInstall      Starts SpeedMeter Pro immediately after setup
    -CreateDesktopShortcut   Creates a desktop shortcut in addition to the Start Menu shortcut
 
-3. Or run SpeedMeter.App.exe directly from this directory.
+3. Direct execution (Diagnostic/Lab use only):
+   Run SpeedMeter.App.exe directly from this directory.
 
 UNINSTALLATION:
 ---------------
@@ -400,13 +412,13 @@ Write-Host "  File:              $setupExeTarget"
 Write-Host "  Size:              $([Math]::Round($setupSize / 1MB, 2)) MB ($setupSize bytes)"
 Write-Host "  SHA-256:           $setupHash"
 Write-Host ""
-Write-Host "Self-Contained Portable Archive ($Runtime):"
+Write-Host "Self-Contained Secondary Diagnostic/Enterprise Archive ($Runtime):"
 Write-Host "  Files:             $scFiles"
 Write-Host "  Uncompressed Size: $([Math]::Round($scSize / 1MB, 2)) MB ($scSize bytes)"
 Write-Host "  ZIP Size:          $([Math]::Round($scZipSize / 1MB, 2)) MB ($scZipSize bytes)"
 Write-Host "  ZIP SHA-256:       $scZipHash"
 Write-Host ""
-Write-Host "Framework-Dependent Portable Archive ($Runtime):"
+Write-Host "Framework-Dependent Secondary Diagnostic/Enterprise Archive ($Runtime):"
 Write-Host "  Files:             $fddFiles"
 Write-Host "  Uncompressed Size: $([Math]::Round($fddSize / 1MB, 2)) MB ($fddSize bytes)"
 Write-Host "  ZIP Size:          $([Math]::Round($fddZipSize / 1MB, 2)) MB ($fddZipSize bytes)"

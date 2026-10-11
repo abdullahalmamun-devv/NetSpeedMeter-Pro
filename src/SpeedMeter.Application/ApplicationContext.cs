@@ -1,5 +1,7 @@
 using System;
+using System.Diagnostics;
 using System.IO;
+using System.Threading.Tasks;
 using SpeedMeter.Core;
 using SpeedMeter.Storage;
 
@@ -149,21 +151,21 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
         if (disposed) return;
         disposed = true;
 
-        var deadline = DateTimeOffset.UtcNow + timeout;
+        var sw = Stopwatch.StartNew();
         settingsService.SettingsChanged -= OnSettingsChanged;
         collector.Updated -= OnCollectorUpdated;
 
         try { connectivityService.Dispose(); } catch { }
 
-        // 1. Collector disposal within time budget
-        var remainingForCollector = deadline - DateTimeOffset.UtcNow;
+        // 1. Collector disposal within monotonic time budget
+        var remainingForCollector = timeout - sw.Elapsed;
         if (remainingForCollector > TimeSpan.Zero)
         {
             try { collector.Dispose(); } catch { }
         }
 
         // 2. Storage disposal bounded by remaining whole-application budget
-        var remainingForStorage = deadline - DateTimeOffset.UtcNow;
+        var remainingForStorage = timeout - sw.Elapsed;
         if (remainingForStorage > TimeSpan.FromMilliseconds(50))
         {
             var storageTask = Task.Run(() =>

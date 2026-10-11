@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Security.Principal;
@@ -56,10 +58,35 @@ public static class InstallerEngine
         return Environment.UserName;
     }
 
-    public static bool RequestGracefulShutdown(string userSid, TimeSpan timeout, Action<string>? log = null)
+    public static Process[] GetActiveInstances(string processName = "SpeedMeter.App")
     {
-        log?.Invoke("Checking for running SpeedMeter Pro instances...");
-        var processes = Process.GetProcessesByName("SpeedMeter.App");
+        int currentSessionId;
+        try { currentSessionId = Process.GetCurrentProcess().SessionId; }
+        catch { currentSessionId = -1; }
+
+        var currentPid = Process.GetCurrentProcess().Id;
+        var list = new List<Process>();
+        foreach (var p in Process.GetProcessesByName(processName))
+        {
+            try
+            {
+                if (p.Id != currentPid && (currentSessionId == -1 || p.SessionId == currentSessionId))
+                {
+                    list.Add(p);
+                }
+            }
+            catch
+            {
+                // Access denied or process exited
+            }
+        }
+        return list.ToArray();
+    }
+
+    public static bool RequestGracefulShutdown(string userSid, TimeSpan timeout, Action<string>? log = null, string processName = "SpeedMeter.App")
+    {
+        log?.Invoke("Checking for running SpeedMeter Pro instances in current session...");
+        var processes = GetActiveInstances(processName);
         if (processes.Length == 0) return true;
 
         log?.Invoke("Sending graceful shutdown request to active instance...");
@@ -86,17 +113,33 @@ public static class InstallerEngine
         }
         catch { }
 
-        // Wait for processes to exit
-        var deadline = DateTimeOffset.UtcNow + timeout;
-        while (DateTimeOffset.UtcNow < deadline)
+        // Monotonic wait for processes to exit
+        var sw = Stopwatch.StartNew();
+        var signaled = false;
+        while (sw.Elapsed < timeout)
         {
-            var active = Process.GetProcessesByName("SpeedMeter.App");
+            var active = GetActiveInstances(processName);
             if (active.Length == 0)
             {
                 log?.Invoke("SpeedMeter Pro exited gracefully.");
                 return true;
             }
-            Thread.Sleep(250);
+
+            if (!signaled)
+            {
+                try
+                {
+                    if (EventWaitHandle.TryOpenExisting(@"Local\SpeedMeterPro.Shutdown." + userSid, out var handle))
+                    {
+                        handle.Set();
+                        handle.Dispose();
+                        signaled = true;
+                    }
+                }
+                catch { }
+            }
+
+            Thread.Sleep(100);
         }
 
         log?.Invoke("SpeedMeter Pro did not exit within graceful shutdown timeout.");
@@ -113,10 +156,10 @@ public static class InstallerEngine
         log($"Target Directory: {targetDir}");
 
         // 1. Graceful Shutdown Handshake
-        var runningProcs = Process.GetProcessesByName("SpeedMeter.App");
+        var runningProcs = GetActiveInstances("SpeedMeter.App");
         if (runningProcs.Length > 0)
         {
-            var closed = RequestGracefulShutdown(userSid, TimeSpan.FromSeconds(5), log);
+            var closed = RequestGracefulShutdown(userSid, TimeSpan.FromSeconds(5), log, "SpeedMeter.App");
             if (!closed)
             {
                 throw new SpeedMeterRunningException("SpeedMeter Pro is currently running and could not be closed gracefully. Installation stopped to prevent data corruption.");
@@ -276,10 +319,10 @@ public static class InstallerEngine
         log("Beginning uninstallation of SpeedMeter Pro...");
 
         // 1. Graceful shutdown check
-        var runningProcs = Process.GetProcessesByName("SpeedMeter.App");
+        var runningProcs = GetActiveInstances("SpeedMeter.App");
         if (runningProcs.Length > 0)
         {
-            var closed = RequestGracefulShutdown(userSid, TimeSpan.FromSeconds(5), log);
+            var closed = RequestGracefulShutdown(userSid, TimeSpan.FromSeconds(5), log, "SpeedMeter.App");
             if (!closed)
             {
                 throw new SpeedMeterRunningException("SpeedMeter Pro is running and could not be closed gracefully. Uninstallation aborted.");

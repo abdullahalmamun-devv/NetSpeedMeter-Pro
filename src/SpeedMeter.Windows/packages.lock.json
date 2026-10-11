@@ -5,7 +5,6 @@
       "speedmeter.core": {
         "type": "Project"
       }
-    },
-    "net10.0/win-x64": {}
+    }
   }
 }

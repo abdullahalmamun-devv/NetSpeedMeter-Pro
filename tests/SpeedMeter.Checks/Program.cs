@@ -5,6 +5,7 @@ using SpeedMeter.Windows;
 
 if (SpeedMeter.Checks.AuditFixtures.TryRunChild(args) is int childExit) return childExit;
 if (SpeedMeter.Checks.V1FoundationFixtures.TryRunChild(args) is int v1ChildExit) return v1ChildExit;
+if (SpeedMeter.Checks.V1Wave5ReleaseFixtures.TryRunChild(args) is int w5ChildExit) return w5ChildExit;
 
 var passed = 0;
 var skipped = 0;

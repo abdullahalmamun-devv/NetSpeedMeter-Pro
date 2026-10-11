@@ -138,12 +138,22 @@ try {
     }
 
     $installedApp = Join-Path $drillDir 'SpeedMeter.App.exe'
-    if (-not (Test-Path -LiteralPath $installedApp)) {
-        throw "Installer drill failed: SpeedMeter.App.exe missing after setup."
+    $installedDll = Join-Path $drillDir 'SpeedMeter.App.dll'
+    if (-not (Test-Path -LiteralPath $installedApp) -or -not (Test-Path -LiteralPath $installedDll)) {
+        throw "Installer drill failed: SpeedMeter.App binary missing after setup."
     }
 
     $appSig = Get-AuthenticodeSignature -FilePath $installedApp
     Write-Host "Installed SpeedMeter.App.exe Authenticode Status: $($appSig.Status)" -ForegroundColor Green
+
+    # Inspect embedded commit identity (Blocker E: SourceRevisionId == ReleaseSourceSha)
+    $vi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($installedDll)
+    $prodVersion = $vi.ProductVersion
+    Write-Host "Installed SpeedMeter.App.dll ProductVersion: $prodVersion" -ForegroundColor Cyan
+    if ($prodVersion -notmatch [regex]::Escape($headSha)) {
+        throw "Installer drill failed: Installed binary ProductVersion ($prodVersion) does not contain ReleaseSourceSha ($headSha)."
+    }
+    Write-Host "Installed binary commit identity ($headSha): VERIFIED" -ForegroundColor Green
 
     # Run silent uninstall drill
     Write-Host "Running silent uninstallation drill from sandbox..." -ForegroundColor Yellow
@@ -167,16 +177,19 @@ try {
 }
 
 # 8. Dynamic Gate E1 Decision Computing
-$decisionLabel = if ($SignMode -eq 'Production') {
-    "GATE E1 INDEPENDENTLY VERIFIED -- RC FIELD VALIDATION AUTHORIZED (PRODUCTION SIGNED)"
-} else {
-    "GATE E1 INDEPENDENTLY VERIFIED -- RC FIELD VALIDATION AUTHORIZED (TEST-SIGNED RC LAB MODE)"
+if ($SkipTests -or $SkipSmoke -or $AllowDirty) {
+    Write-Host ""
+    Write-Host "================================================================" -ForegroundColor Yellow
+    Write-Host "  DEVELOPER PACKAGE -- NOT GATE VERIFIED" -ForegroundColor Yellow
+    Write-Host "  (Bypass flags detected: SkipTests=$SkipTests, SkipSmoke=$SkipSmoke, AllowDirty=$AllowDirty)" -ForegroundColor Yellow
+    Write-Host "================================================================" -ForegroundColor Yellow
+    exit 0
 }
 
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Green
-Write-Host "  $decisionLabel" -ForegroundColor Green
-Write-Host "  GATE E2: V1.0 PUBLIC RELEASE NOT VERIFIED -- GA BLOCKED" -ForegroundColor Yellow
+Write-Host "  GATE E1 INDEPENDENTLY VERIFIED — CONSUMER EXPERIENCE CLOSURE AUTHORIZED" -ForegroundColor Green
+Write-Host "  GATE E2: V1.0 PUBLIC RELEASE NOT VERIFIED — GA BLOCKED" -ForegroundColor Yellow
 Write-Host "           (Awaiting physical multi-monitor, live Windows 11 matrix," -ForegroundColor Yellow
 Write-Host "            24-hour mixed workload, and 7-day soak evidence)" -ForegroundColor Yellow
 Write-Host "================================================================" -ForegroundColor Green

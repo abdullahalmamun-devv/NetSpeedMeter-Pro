@@ -7,7 +7,7 @@
 ## Build / test status
 
 - **Build:** Succeeded with 0 warnings, 0 errors across 7 projects (`Core`, `Windows`, `Storage`, `Application`, `App`, `Installer`, `Checks`) using .NET 10 SDK 10.0.401.
-- **Fixtures:** 249 passed, 1 intentional skip, 0 failed via `scripts/check.ps1`; 257 passed, 1 skip, 0 failed via `scripts/check.ps1 -Windows`. Total evaluated: 258. Groups include:
+- **Fixtures:** 250 passed, 1 intentional skip, 0 failed via `scripts/check.ps1`; 258 passed, 1 skip, 0 failed via `scripts/check.ps1 -Windows`. Total evaluated: 259. Groups include:
   - 14 baseline arithmetic and boundary checks
   - 21 epoch, large counter, and delta discontinuity fixtures (including mandatory 125 MB / 10s = 12.5 MB/s and 100 Mbps)
   - 7 application collector lifecycle and resilience fixtures

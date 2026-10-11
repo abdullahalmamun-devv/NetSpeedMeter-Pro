@@ -49,7 +49,7 @@ Measurements conducted under standard and degraded workloads:
 ```
 
 ## Policy & Invariants
-1. **Total Shutdown Timeout Bound:** The entire whole-application shutdown path is strictly bounded to **3.0 seconds maximum**.
+1. **Total Shutdown Timeout Bound:** The entire whole-application shutdown path is strictly bounded to **3.0 seconds maximum**, enforced via monotonic clock (`Stopwatch.StartNew()`) in `ApplicationContext.DisposeWithTimeout` and `InstallerEngine.RequestGracefulShutdown`, completely eliminating wall-clock drift, NTP jumps, or system time adjustment hazards.
 2. **Storage Barrier Timeout:** The `storage.FlushAsync()` call uses a 2.0-second cancellation token deadline.
 3. **Non-Blocking Failure UX:** If storage fails to flush within the deadline or is degraded, SpeedMeter Pro:
    - Sets `CollectorShutdownResult(false, stage, diagnostic)`.

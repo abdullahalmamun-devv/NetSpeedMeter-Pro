@@ -141,7 +141,10 @@ foreach ($filePath in $filesToSign) {
     }
 
     $verify = Get-AuthenticodeSignature -FilePath $filePath
-    if ($verify.Status -eq 'Valid') {
+    if ($Mode -eq 'Production' -and -not $verify.TimeStamperCertificate) {
+        Write-Host " [FAILED: Missing RFC 3161 timestamp in Production mode]" -ForegroundColor Red
+        $signingFailures++
+    } elseif ($verify.Status -eq 'Valid') {
         Write-Host " [OK] (Valid)" -ForegroundColor Green
     } elseif ($Mode -eq 'Test' -and $verify.Status -eq 'UnknownError') {
         # UnknownError is expected for self-signed test certificate whose root is not in Trusted Root CAs
