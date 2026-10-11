@@ -454,6 +454,21 @@ public static class V1Wave3Fixtures
                 Require(window.Left >= workArea.Left, "Top-left anchor clamped horizontally.");
                 Require(window.Top >= workArea.Top, "Top-left anchor clamped vertically.");
 
+                // DEF-C01: Multi-monitor secondary display positioning verification
+                var secondaryRightWorkArea = new Rect(1920, 0, 1920, 1040);
+                var secondaryRightAnchor = new Rect(2500, 900, 40, 20);
+                window.PositionNear(secondaryRightAnchor, secondaryRightWorkArea);
+                Require(window.Left >= secondaryRightWorkArea.Left, "Secondary right monitor Left boundary honored.");
+                Require(window.Left + window.Width <= secondaryRightWorkArea.Right, "Secondary right monitor Right boundary honored.");
+                Require(window.Top >= secondaryRightWorkArea.Top, "Secondary right monitor Top boundary honored.");
+                Require(window.Top + window.Height <= secondaryRightWorkArea.Bottom, "Secondary right monitor Bottom boundary honored.");
+
+                var secondaryLeftWorkArea = new Rect(-1920, 0, 1920, 1040);
+                var secondaryLeftAnchor = new Rect(-500, 500, 40, 20);
+                window.PositionNear(secondaryLeftAnchor, secondaryLeftWorkArea);
+                Require(window.Left >= secondaryLeftWorkArea.Left, "Secondary left monitor Left boundary honored.");
+                Require(window.Left + window.Width <= secondaryLeftWorkArea.Right, "Secondary left monitor Right boundary honored.");
+
                 window.Close();
             }
             finally
@@ -461,6 +476,91 @@ public static class V1Wave3Fixtures
                 if (File.Exists(settingsPath)) File.Delete(settingsPath);
             }
         }));
+
+        check("W3-PLACEMENT-MULTI-MONITOR: PlacementHelper handles multi-monitor coordinates deterministically", () =>
+        {
+            var target = new Rect(2500, 800, 100, 40);
+            var secondaryWa = new Rect(1920, 0, 1920, 1040);
+            var placement = SpeedMeter.App.PlacementHelper.CalculatePlacement(target, 320, 480, secondaryWa);
+
+            Require(placement.Left >= secondaryWa.Left + 8.0, "Left boundary clamping failed.");
+            Require(placement.Left + placement.Width <= secondaryWa.Right - 8.0, "Right boundary clamping failed.");
+            Require(placement.Top >= secondaryWa.Top + 8.0, "Top boundary clamping failed.");
+            Require(placement.Top + placement.Height <= secondaryWa.Bottom - 8.0, "Bottom boundary clamping failed.");
+
+            // Verify flip behavior when target is near bottom of secondary monitor
+            var bottomTarget = new Rect(2500, 1000, 100, 40);
+            var flippedPlacement = SpeedMeter.App.PlacementHelper.CalculatePlacement(bottomTarget, 320, 480, secondaryWa);
+            Require(flippedPlacement.Top < bottomTarget.Top, "Window did not flip above target when exceeding bottom work area.");
+            Require(flippedPlacement.Top + flippedPlacement.Height <= secondaryWa.Bottom - 8.0, "Flipped window exceeds bottom bounds.");
+        });
+
+        check("W3-SETTINGS-SYNC: Settings changes propagate dynamically to Collector.Interval", () =>
+        {
+            var settingsPath = Path.Combine(Path.GetTempPath(), $"w3_sync_{Guid.NewGuid():N}.json");
+            var dbPath = Path.Combine(Path.GetTempPath(), $"w3_sync_{Guid.NewGuid():N}.db");
+            ApplicationContext? ctx = null;
+
+            try
+            {
+                var settingsService = new SettingsService(settingsPath);
+                var provider = new FakeAdapterProvider();
+                ctx = new ApplicationContext(
+                    provider,
+                    new MeasurementClock(),
+                    dbPath: dbPath,
+                    settingsPath: settingsPath,
+                    explicitSettingsService: settingsService);
+
+                Require(Math.Abs(ctx.Collector.Interval - 1.0) < 0.001, "Collector default interval should be 1.0s.");
+
+                // Change settings to 2.0s
+                var current = settingsService.CurrentSettings;
+                current.SampleIntervalSeconds = 2.0;
+                settingsService.Save(current);
+
+                Require(Math.Abs(ctx.Collector.Interval - 2.0) < 0.001, "Collector interval did not update when Settings changed.");
+
+                // Change settings to 0.5s
+                current.SampleIntervalSeconds = 0.5;
+                settingsService.Save(current);
+
+                Require(Math.Abs(ctx.Collector.Interval - 0.5) < 0.001, "Collector interval did not update to 0.5s.");
+            }
+            finally
+            {
+                ctx?.Dispose();
+                DeleteDbFiles(dbPath);
+                if (File.Exists(settingsPath)) File.Delete(settingsPath);
+            }
+        });
+
+        check("W3-ARCH-BOUNDARY: SpeedMeter.App does not reference SpeedMeter.Storage or Microsoft.Data.Sqlite", () =>
+        {
+            var appAssembly = typeof(SpeedMeter.App.App).Assembly;
+            var referencedNames = appAssembly.GetReferencedAssemblies().Select(a => a.Name).ToList();
+
+            Require(!referencedNames.Any(n => string.Equals(n, "SpeedMeter.Storage", StringComparison.OrdinalIgnoreCase)),
+                "SpeedMeter.App must not reference SpeedMeter.Storage assembly.");
+            Require(!referencedNames.Any(n => string.Equals(n, "Microsoft.Data.Sqlite", StringComparison.OrdinalIgnoreCase)),
+                "SpeedMeter.App must not reference Microsoft.Data.Sqlite assembly.");
+
+            foreach (var type in appAssembly.GetTypes())
+            {
+                foreach (var field in type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static))
+                {
+                    var fieldType = field.FieldType.FullName ?? "";
+                    Require(!fieldType.Contains("SpeedMeter.Storage") && !fieldType.Contains("Sqlite"),
+                        $"Type {type.FullName} has field {field.Name} referencing storage type {fieldType}");
+                }
+                foreach (var prop in type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static))
+                {
+                    var propType = prop.PropertyType.FullName ?? "";
+                    Require(!propType.Contains("SpeedMeter.Storage") && !propType.Contains("Sqlite"),
+                        $"Type {type.FullName} has property {prop.Name} referencing storage type {propType}");
+                }
+            }
+        });
 
         check("W3-APPS-TRUTHFUL: Apps page exposes truthful V1.5 gating without simulated processes", () => RunOnSta(() =>
         {

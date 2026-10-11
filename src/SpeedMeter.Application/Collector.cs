@@ -18,6 +18,7 @@ public sealed record CollectorSnapshot(
 {
     public CanonicalScopeDecision? ScopeDecision { get; init; }
     public StorageStatus? StorageStatus { get; init; }
+    public string? DegradedReason => StorageStatus?.DegradedReason;
 }
 
 /// <summary>

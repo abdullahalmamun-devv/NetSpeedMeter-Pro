@@ -83,8 +83,8 @@ public sealed class OverviewViewModel : ViewModelBase
         latestReading = snapshot.Reading;
 
         CollectorStateText = snapshot.State.ToString();
-        IsDegraded = snapshot.State == CollectorState.Degraded || (snapshot.StorageStatus?.Health == Storage.StorageHealth.Degraded);
-        DegradedReason = snapshot.StorageStatus?.DegradedReason;
+        IsDegraded = snapshot.State == CollectorState.Degraded;
+        DegradedReason = snapshot.DegradedReason;
 
         var decision = snapshot.ScopeDecision;
         if (decision is not null)

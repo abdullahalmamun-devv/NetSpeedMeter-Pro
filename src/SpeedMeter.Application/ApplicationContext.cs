@@ -34,6 +34,16 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
 
     public ApplicationContext(
         IAdapterCounterProvider provider,
+        IMeasurementClock? clock,
+        IRouteProvider? routeProvider,
+        string? dbPath,
+        string? settingsPath)
+        : this(provider, clock, routeProvider, dbPath, settingsPath, null, null)
+    {
+    }
+
+    public ApplicationContext(
+        IAdapterCounterProvider provider,
         IMeasurementClock? clock = null,
         IRouteProvider? routeProvider = null,
         string? dbPath = null,
@@ -57,8 +67,24 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
         var effectiveClock = clock ?? new MeasurementClock();
         this.collector = new Collector(provider, effectiveClock, routeProvider, this.storage);
 
+        // Synchronize collector interval with persisted settings
+        var initialSettings = this.settingsService.CurrentSettings;
+        if (initialSettings.SampleIntervalSeconds > 0)
+        {
+            this.collector.Interval = initialSettings.SampleIntervalSeconds;
+        }
+        this.settingsService.SettingsChanged += OnSettingsChanged;
+
         // Feed live graph buffer on every collector tick
         this.collector.Updated += OnCollectorUpdated;
+    }
+
+    private void OnSettingsChanged(SpeedMeterSettings settings)
+    {
+        if (settings.SampleIntervalSeconds > 0)
+        {
+            collector.Interval = settings.SampleIntervalSeconds;
+        }
     }
 
     private void OnCollectorUpdated(CollectorSnapshot snapshot)
@@ -81,6 +107,7 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
         if (disposed) return;
         disposed = true;
 
+        settingsService.SettingsChanged -= OnSettingsChanged;
         collector.Updated -= OnCollectorUpdated;
         collector.Dispose();
         storage.Dispose();
@@ -91,6 +118,7 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
         if (disposed) return;
         disposed = true;
 
+        settingsService.SettingsChanged -= OnSettingsChanged;
         collector.Updated -= OnCollectorUpdated;
         collector.Dispose();
         await storage.DisposeAsync().ConfigureAwait(false);

@@ -25,13 +25,17 @@
                             <ColumnDefinition Width="200" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="Color Theme:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
-                        <ComboBox Grid.Column="1" SelectedValue="{Binding Theme}" SelectedValuePath="Tag" Width="200" HorizontalAlignment="Left">
-                            <ComboBoxItem Content="Dark (Default)" Tag="Dark" />
-                            <ComboBoxItem Content="Light" Tag="Light" />
-                            <ComboBoxItem Content="System" Tag="System" />
-                            <ComboBoxItem Content="High Contrast" Tag="HighContrast" />
-                        </ComboBox>
+                        <TextBlock Text="Color Theme:" VerticalAlignment="Top" Margin="0,4,0,0" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <StackPanel Grid.Column="1">
+                            <ComboBox SelectedValue="{Binding Theme}" SelectedValuePath="Tag" Width="200" HorizontalAlignment="Left">
+                                <ComboBoxItem Content="Dark (Default)" Tag="Dark" />
+                                <ComboBoxItem Content="Light" Tag="Light" />
+                                <ComboBoxItem Content="System" Tag="System" />
+                                <ComboBoxItem Content="High Contrast" Tag="HighContrast" />
+                            </ComboBox>
+                            <TextBlock Text="SpeedMeter Pro includes the audited high-contrast Dark theme. Light/System dynamic themes are scheduled for V1.5."
+                                       FontSize="11" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" />
+                        </StackPanel>
                     </Grid>
 
                     <Grid Margin="0,0,0,12">

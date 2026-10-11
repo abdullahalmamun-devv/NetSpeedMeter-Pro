@@ -24,7 +24,7 @@
 
                     <TextBlock Text="Application traffic analytics is not available in V1" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,12" />
 
-                    <TextBlock Text="Standard-user Windows execution does not expose per-process socket attribution without elevated privileges or an inspected kernel filter driver. In strict accordance with the product charter, SpeedMeter Pro never fabricates processes, estimates app traffic from port numbers, or displays simulated application rows."
+                    <TextBlock Text="Standard-user Windows execution does not expose per-process socket byte attribution out-of-the-box. In strict accordance with the product charter, SpeedMeter Pro never fabricates processes, estimates app traffic from port numbers, or displays simulated application rows."
                                TextWrapping="Wrap" LineHeight="22" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,16" />
 
                     <TextBlock Text="What is working right now:" FontWeight="SemiBold" FontSize="{StaticResource FontSizeBody}" Margin="0,0,0,8" />
@@ -33,7 +33,7 @@
                     <TextBlock Text="• Durable SQLite WAL persistence, calendar billing cycles, and quota monitoring" Foreground="{StaticResource TextSecondaryBrush}" Margin="8,0,0,4" />
                     <TextBlock Text="• Keyset-paged intervals and atomic CSV/JSON exports in Usage &amp; History" Foreground="{StaticResource TextSecondaryBrush}" Margin="8,0,0,16" />
 
-                    <TextBlock Text="ProcessIdentity research and least-privilege driver evaluation are tracked under milestone V1.5 (ADR-007)." FontSize="{StaticResource FontSizeBodySmall}" Foreground="{StaticResource MutedBrush}" />
+                    <TextBlock Text="ADR-007 research evaluates least-privilege options (Performance Log Users, ETW trace security descriptors, or an isolated authenticated helper) tracked under milestone V1.5 before committing to a permission model." FontSize="{StaticResource FontSizeBodySmall}" Foreground="{StaticResource MutedBrush}" />
                 </StackPanel>
             </Border>
 

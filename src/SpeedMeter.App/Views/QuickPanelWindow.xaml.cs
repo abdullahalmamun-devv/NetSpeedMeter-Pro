@@ -32,30 +32,11 @@ public partial class QuickPanelWindow : Window
         Hide();
     }
 
-    public void PositionNear(Rect target)
+    public void PositionNear(Rect target, Rect? workAreaOverride = null)
     {
-        var workArea = SystemParameters.WorkArea;
-        var width = Width;
-        var height = Height;
-
-        // Default position: below target if fits, otherwise above
-        double left = target.Left + (target.Width - width) / 2.0;
-        double top = target.Bottom + 6;
-
-        if (top + height > workArea.Bottom)
-        {
-            top = target.Top - height - 6;
-        }
-
-        // Clamp horizontally within work area
-        if (left < workArea.Left) left = workArea.Left + 8;
-        if (left + width > workArea.Right) left = workArea.Right - width - 8;
-
-        // Clamp vertically
-        if (top < workArea.Top) top = workArea.Top + 8;
-        if (top + height > workArea.Bottom) top = workArea.Bottom - height - 8;
-
-        Left = left;
-        Top = top;
+        var workArea = workAreaOverride ?? PlacementHelper.GetWorkAreaForTarget(target);
+        var placement = PlacementHelper.CalculatePlacement(target, Width, Height, workArea);
+        Left = placement.Left;
+        Top = placement.Top;
     }
 }

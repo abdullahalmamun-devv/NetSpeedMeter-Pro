@@ -9,7 +9,6 @@ public sealed class MonitorSession : IDisposable
 {
     private readonly ApplicationContext context;
 
-    public ApplicationContext Context => context;
     public Collector Collector => context.Collector;
     public CollectorSnapshot Latest => context.Collector.Latest;
     public IUsageHistoryService HistoryService => context.HistoryService;

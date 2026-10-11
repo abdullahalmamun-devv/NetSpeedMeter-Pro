@@ -1,4 +1,5 @@
 using System;
+using SpeedMeter.Core;
 
 namespace SpeedMeter.Storage;
 
@@ -72,23 +73,6 @@ public sealed record CounterCheckpointRecord(
     long ObservedAtUtcMs,
     byte[] CounterRx,
     byte[] CounterTx);
-
-public sealed record UsageIntervalRecord(
-    string IntervalId,
-    string SourceIntervalKey,
-    string SessionId,
-    string ClockSegmentId,
-    string ScopeRevisionId,
-    string NetworkProfileId,
-    long StartUtcMs,
-    long EndUtcMs,
-    long? MonotonicDurationTicks,
-    long BytesRx,
-    long BytesTx,
-    bool IsCoarse,
-    bool IsGap,
-    string? GapReason,
-    string TimingConfidence);
 
 public sealed record DailyRollupRecord(
     long StartUtcMs,

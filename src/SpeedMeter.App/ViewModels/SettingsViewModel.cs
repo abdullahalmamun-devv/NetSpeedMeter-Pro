@@ -86,7 +86,9 @@ public sealed class SettingsViewModel : ViewModelBase
 
             s.Sanitize();
             settingsService.Save(s);
-            StatusMessage = "Settings saved successfully.";
+            StatusMessage = theme == "Dark" 
+                ? "Settings saved successfully." 
+                : "Settings saved. (Note: Dark theme is active; dynamic theme switching is scheduled for V1.5).";
         }
         catch (Exception ex)
         {

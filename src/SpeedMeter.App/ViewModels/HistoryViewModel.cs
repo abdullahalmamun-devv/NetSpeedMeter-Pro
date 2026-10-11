@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using System.Windows.Input;
 using SpeedMeter.Application;
 using SpeedMeter.Core;
-using SpeedMeter.Storage;
 
 namespace SpeedMeter.App.ViewModels;
 
@@ -34,6 +33,7 @@ public sealed class HistoryViewModel : ViewModelBase
     private long? lastCursorStartUtcMs;
     private string? lastCursorIntervalId;
     private CancellationTokenSource? queryCts;
+    private long currentQueryId;
 
     public QueryPeriodType SelectedPeriod
     {
@@ -90,6 +90,8 @@ public sealed class HistoryViewModel : ViewModelBase
 
     public async Task LoadPeriodAsync(QueryPeriodType period)
     {
+        var queryId = Interlocked.Increment(ref currentQueryId);
+
         // Cancel in-flight query to eliminate stale results race condition
         queryCts?.Cancel();
         queryCts?.Dispose();
@@ -125,7 +127,7 @@ public sealed class HistoryViewModel : ViewModelBase
                 cycleDay: cycleDay,
                 ct: ct).ConfigureAwait(true);
 
-            if (ct.IsCancellationRequested) return;
+            if (ct.IsCancellationRequested || queryId != Volatile.Read(ref currentQueryId)) return;
 
             TotalBytesText = MetricFormat.Bytes(summary.TotalBytes);
             RxBytesText = MetricFormat.Bytes(summary.BytesRx);
@@ -152,17 +154,24 @@ public sealed class HistoryViewModel : ViewModelBase
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            ExportStatusMessage = $"Failed to load history: {ex.Message}";
+            if (queryId == Volatile.Read(ref currentQueryId))
+            {
+                ExportStatusMessage = $"Failed to load history: {ex.Message}";
+            }
         }
         finally
         {
-            if (!ct.IsCancellationRequested) IsLoading = false;
+            if (!ct.IsCancellationRequested && queryId == Volatile.Read(ref currentQueryId))
+            {
+                IsLoading = false;
+            }
         }
     }
 
     public async Task LoadNextPageAsync(CancellationToken ct = default)
     {
         if (currentRange.EndUtcMs <= currentRange.StartUtcMs) return;
+        var queryId = Volatile.Read(ref currentQueryId);
 
         try
         {
@@ -172,6 +181,8 @@ public sealed class HistoryViewModel : ViewModelBase
                 lastCursorIntervalId,
                 pageSize: 50,
                 ct: ct).ConfigureAwait(true);
+
+            if (ct.IsCancellationRequested || queryId != Volatile.Read(ref currentQueryId)) return;
 
             if (page.Count == 0)
             {
@@ -192,7 +203,10 @@ public sealed class HistoryViewModel : ViewModelBase
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            ExportStatusMessage = $"Failed loading page: {ex.Message}";
+            if (queryId == Volatile.Read(ref currentQueryId))
+            {
+                ExportStatusMessage = $"Failed loading page: {ex.Message}";
+            }
         }
     }
 

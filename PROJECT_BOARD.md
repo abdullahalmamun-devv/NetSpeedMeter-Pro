@@ -1,16 +1,16 @@
 # Current milestone
 
-**V1.0 Production Engineering — WAVE 3 COMPLETE · PRODUCT SURFACE INTEGRATED · GATE C AUDIT AUTHORIZED.** Full user-facing product surface and export foundation implemented on top of verified domain and application facade layers. 159 automated checks passing, 1 check explicitly skipped (SkipCheckException demonstration), 0 failed. Real Windows UI smoke test passing with exit code 0 and all 10 native assertions True. Full MVVM presentation architecture (Overview, Live Traffic, History, Quota, Settings, Network Tools, Apps truthful gating, Quick Panel, Tray context menu, and Export Service) strictly isolated from raw SQLite and disk storage. Project Director: lead agent. Updated 11 October 2026 (Asia/Dhaka).
+**V1.0 Production Engineering — GATE C VERIFIED AFTER REPAIRS · NEXT V1 WAVE AUTHORIZED.** Independent Gate C forensic audit complete. 8 audit defects (DEF-C01 through DEF-C08) identified and remediated. Strict presentation decoupling verified via reflection (zero CLR references to `SpeedMeter.Storage` or `Microsoft.Data.Sqlite` in `SpeedMeter.App.dll`). Dynamic settings-to-collector sync, multi-monitor/DPI `PlacementHelper`, tray semantic contract, monotonic query ID race prevention, and truthful storage degraded banner fully verified. 162 automated checks passing, 1 check explicitly skipped (SkipCheckException demonstration), 0 failed. Real Windows UI smoke test passing with exit code 0 and all 10 native assertions True. Independent Audit Director: lead agent. Updated 11 October 2026 (Asia/Dhaka).
 
 # In progress
 
-None. V1 Wave 3 implementation complete. Independent V1 Gate C forensic audit authorized to begin.
+None. V1 Gate C forensic audit complete.
 
-# Ready (Next Wave: Independent V1 Gate C Forensic Audit)
+# Ready (Next Wave: V1.5 / Advanced Product Engineering)
 
 | Task | Owner | Reviewer | Dependency | Acceptance |
 |---|---|---|---|---|
-| V1-AUDIT-003 | Independent Audit Director | Software Architect + QA | V1-DASH-001, V1-TRAY-001, V1-EXPORT-001 | Independent Gate C forensic audit of complete product surface, MVVM isolation, export safety, accessibility, and presentation invariants |
+| V1.5-PLAN-001 | Project Director | Software Architect + Product | V1-AUDIT-003 | Author V1.5 Master Execution Plan covering least-privilege ETW network attribution research, dynamic light/system theming, and connectivity tools |
 
 # Review
 
@@ -20,6 +20,7 @@ None currently.
 
 | Task | Owner | Reviewer | Completion Evidence |
 |---|---|---|---|
+| V1-AUDIT-003 | Independent Audit Director | Software Architect + QA | Independent Gate C forensic audit of product surface, presentation isolation, multi-monitor/DPI, tray contract, settings sync, and export safety. Remediated 8 defects (DEF-C01 to DEF-C08). 162 passed, 1 skipped, 0 failed. Native UI smoke verified. `GATE C VERIFIED AFTER REPAIRS — NEXT V1 WAVE AUTHORIZED`. |
 | V1-DASH-001 | Desktop UI / UX | Accessibility + Product | Complete 5-destination navigation shell (`OverviewView`, `LiveTrafficView`, `AppsView`, `HistoryView`, `NetworkToolsView`, `SettingsView`), MVVM ViewModels, design tokens (`Tokens.xaml`, `ThemeDark.xaml`), tabular numerals, query cancellation token CTS in `HistoryViewModel`, basis points threshold formatting/parsing in `QuotaViewModel`, live graph windowing in `LiveTrafficViewModel`. Verified by fixtures and smoke test. |
 | V1-TRAY-001 | Windows Platform / UI | Architect + QA | `QuickPanelWindow` with multi-monitor work-area clamping, auto-dismiss on deactivate/Escape, Tray menu preserved with index 4 click-through recovery invariant intact, minimal floating widget synchronized. Verified by `W3-QUICKPANEL` and `smoke.ps1`. |
 | V1-EXPORT-001 | Storage / Data Engineer | Product + QA | `IExportService` / `ExportService`: Keyset-paged CSV export with metadata disclosure comments and formula injection neutralization (`=`, `+`, `-`, `@`, `\t`, `\r` prepended with `'`), valid typed-numeric JSON export with schema v1.0 and explicit nulls, atomic `.tmp` file replacement. Verified by `W3-EXPORT` fixtures. |

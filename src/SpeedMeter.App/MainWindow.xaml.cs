@@ -24,6 +24,7 @@ public partial class MainWindow : Window
 {
     private readonly MonitorSession monitor;
     private readonly Forms.NotifyIcon tray;
+    private readonly Forms.ToolStripMenuItem disableClickThroughMenuItem;
     private readonly WidgetWindow widget;
     private readonly QuickPanelWindow quickPanel;
     private readonly MainViewModel viewModel;
@@ -38,6 +39,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer displayTimer;
     private CollectorSnapshot? displayed;
     private int tickCount;
+
+    internal Forms.ToolStripMenuItem DisableClickThroughMenuItem => disableClickThroughMenuItem;
 
     private sealed record AdapterOption(string Id, string Label, string Description);
 
@@ -69,19 +72,31 @@ public partial class MainWindow : Window
         HistoryViewControl.DataContext = viewModel.History;
         SettingsViewControl.DataContext = viewModel.Settings;
 
-        // Tray Setup (Preserving strict index 4 for smoke test)
+        // Tray Setup (Preserving strict index 4 and exposing semantic identifier)
         tray = new Forms.NotifyIcon { Icon = System.Drawing.SystemIcons.Application, Text = "SpeedMeter Pro · starting", Visible = true };
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("Open dashboard", null, (_, _) => Dispatcher.Invoke(OpenDashboard));                       // Index 0
         menu.Items.Add("Show / hide widget", null, (_, _) => Dispatcher.Invoke(() => { if (widget.IsVisible) widget.Hide(); else widget.Show(); })); // Index 1
         menu.Items.Add("Reset widget position", null, (_, _) => Dispatcher.Invoke(() => { widget.ResetPosition(); widget.Show(); })); // Index 2
         menu.Items.Add("Toggle widget lock", null, (_, _) => Dispatcher.Invoke(widget.ToggleLock));                // Index 3
-        menu.Items.Add("Disable click-through", null, (_, _) => Dispatcher.Invoke(DisableWidgetClickThrough));    // Index 4 (Crucial for smoke test)
+        disableClickThroughMenuItem = new Forms.ToolStripMenuItem("Disable click-through", null, (_, _) => Dispatcher.Invoke(DisableWidgetClickThrough))
+        {
+            Name = "DisableClickThroughMenuItem",
+            Tag = "DisableClickThrough"
+        };
+        menu.Items.Add(disableClickThroughMenuItem);                                                               // Index 4 (Semantic identifier + index preserved)
         menu.Items.Add("Pause / resume monitoring", null, (_, _) => monitor.TogglePause());                       // Index 5
         menu.Items.Add("Quick panel", null, (_, _) => Dispatcher.Invoke(OpenQuickPanel));                         // Index 6
         menu.Items.Add("Quit", null, (_, _) => Dispatcher.Invoke(Quit));                                           // Index 7
         tray.ContextMenuStrip = menu;
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(OpenDashboard);
+
+        // Subscribe to dynamic settings changes
+        monitor.SettingsService.SettingsChanged += OnSettingsChanged;
+        if (smokeDirectory is null)
+        {
+            ApplySettings(monitor.SettingsService.CurrentSettings);
+        }
 
         displayTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         displayTimer.Tick += (_, _) => PollSnapshot();
@@ -194,7 +209,7 @@ public partial class MainWindow : Window
                 var clickThroughBeforeShow = widget.NativeClickThrough && widget.IsClickThrough;
                 widget.Show();
                 await Task.Delay(250);
-                ((Forms.ToolStripMenuItem)tray.ContextMenuStrip!.Items[4]).PerformClick();
+                (DisableClickThroughMenuItem ?? (Forms.ToolStripMenuItem)tray.ContextMenuStrip!.Items[4]).PerformClick();
                 var clickThroughRecoveredViaTray = !widget.NativeClickThrough && !widget.IsClickThrough;
                 var widgetPausedTruthful = widget.StatusSummary.StartsWith("Paused");
                 if (last is not null)
@@ -278,6 +293,11 @@ public partial class MainWindow : Window
         if (tickCount % 12 == 0)
         {
             _ = RefreshHistoricalCardsAsync();
+        }
+
+        if (StorageDegradedBanner is not null)
+        {
+            StorageDegradedBanner.Visibility = snapshot.State == CollectorState.Degraded ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 
@@ -435,6 +455,53 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnSettingsChanged(SpeedMeterSettings settings)
+    {
+        if (quitting) return;
+        Dispatcher.Invoke(() => ApplySettings(settings));
+    }
+
+    private void ApplySettings(SpeedMeterSettings settings)
+    {
+        bits = settings.DisplayUnits == "Mbps";
+        UnitsButton.Content = bits ? "Units: bits/s" : "Units: bytes/s";
+        Chart.Bits = bits;
+        Chart.InvalidateVisual();
+        quickPanel.Chart.Bits = bits;
+        quickPanel.Chart.InvalidateVisual();
+        LiveTrafficViewControl.Chart.Bits = bits;
+        LiveTrafficViewControl.Chart.InvalidateVisual();
+        viewModel.Overview.IsBits = bits;
+        viewModel.LiveTraffic.IsBits = bits;
+
+        widget.Opacity = settings.WidgetOpacity;
+        widget.Topmost = settings.WidgetTopmost;
+        if (widget.IsClickThrough != settings.ClickThrough)
+        {
+            try { widget.SetClickThrough(settings.ClickThrough); } catch { }
+        }
+
+        if (IntervalPicker is not null)
+        {
+            var targetText = settings.SampleIntervalSeconds switch
+            {
+                0.5 => "0.5 seconds",
+                2.0 => "2 seconds",
+                _ => "1 second"
+            };
+            foreach (ComboBoxItem item in IntervalPicker.Items)
+            {
+                if (item.Content?.ToString() == targetText)
+                {
+                    IntervalPicker.SelectedItem = item;
+                    break;
+                }
+            }
+        }
+
+        RenderReading();
+    }
+
     private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
     {
         if (e.Mode == PowerModes.Suspend) monitor.SetSuspended(true);
@@ -466,6 +533,7 @@ public partial class MainWindow : Window
     {
         quitting = true;
         displayTimer.Stop();
+        monitor.SettingsService.SettingsChanged -= OnSettingsChanged;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         tray.Visible = false;
