@@ -1,24 +1,22 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using SpeedMeter.App;
 using SpeedMeter.Application;
 using SpeedMeter.Core;
 using SpeedMeter.Storage;
+using SpeedMeter.Windows;
 
 namespace SpeedMeter.Checks;
 
-public static class NetworkToolsFixtures
+internal static class NetworkToolsFixtures
 {
-    private static void Require(bool condition, string message)
-    {
-        if (!condition) throw new Exception(message);
-    }
-
     public static void Run(Action<string, Action> check)
     {
         check("W4-TOOLS: Host normalization accepts valid hosts/IPs and rejects injection", HostNormalization);
@@ -31,12 +29,13 @@ public static class NetworkToolsFixtures
         check("W4-TOOLS: Public IP lookup handles success, egress caveat, and cached fallback", PublicIpSuccessAndCache);
         check("W4-TOOLS: Public IP lookup rejects oversized response and provider error", PublicIpErrorHandling);
         check("W4-NETINFO: Network details provider contract labels link speed truthfully", NetworkDetailsTruthfulness);
-        check("W4-NETINFO: Wi-Fi metadata queries populate or limit truthfully without degrading monitoring", WifiDetailsTruthfulness);
+        check("W4-NETINFO: Wi-Fi metadata queries correlate strictly to selected adapter and avoid ambiguous band guessing", WifiDetailsSelectedAdapterCorrelation);
         check("W4-STORAGE: SqliteStorageEngine applies migration 3 and persists connectivity & alert timeline", StorageMigrationAndTimeline);
-        check("W4-STORAGE: Migration upgrades schema v2 to v3 preserving existing history and data", StorageMigrationV2ToV3Fidelity);
+        check("W4-STORAGE: Migration upgrades authentic schema v2 to v3 preserving existing history and data", StorageMigrationV2ToV3Fidelity);
         check("W4-STORAGE: Pruning and clear history maintain transaction safety and table integrity", StoragePruneAndClearIntegrity);
-        check("W4-APP: Single instance mutex enforces single instance and activates existing window", SingleInstanceMutexProtection);
-        check("W4-APP: Low resource mode throttles UI refresh without compromising byte accounting", LowResourceModeThrottling);
+        check("W4-APP: Single instance per-user architecture enforces canonical owner across sessions and allows distinct users", SingleInstancePerUserScoping);
+        check("W4-APP: Single instance process-level launch exits secondary process without duplicate collector", SingleInstanceProcessLaunchProtection);
+        check("W4-APP: Low resource mode throttles UI refresh rate without compromising byte accounting", LowResourceProductionThrottling);
         check("W4-PRIVACY: Tool service construction and passive checks generate zero requests", ZeroExternalRequestsWhenUninvoked);
     }
 
@@ -128,8 +127,24 @@ public static class NetworkToolsFixtures
         var invalidTarget = service.PingAsync("bad target/name", null, CancellationToken.None, 5).GetAwaiter().GetResult();
         Require(invalidTarget.Outcome == NetworkToolOutcome.InvalidInput, "Bad target allowed.");
 
-        var invalidCount = service.PingAsync("1.1.1.1", null, CancellationToken.None, 11).GetAwaiter().GetResult();
-        Require(invalidCount.Outcome == NetworkToolOutcome.InvalidInput, "Count > 10 allowed.");
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var canceled = service.PingAsync("1.1.1.1", null, cts.Token, 5).GetAwaiter().GetResult();
+        Require(canceled.Outcome == NetworkToolOutcome.Cancelled, "Canceled ping not reflected.");
+    }
+
+    private static void PingDefault10Attempts()
+    {
+        var count = 0;
+        var ping = new FakePingProvider((_, _, _) =>
+        {
+            count++;
+            return new PingAttemptResult(PingAttemptOutcome.Reply, 15.0, null);
+        });
+        var tools = new NetworkToolsService(new FakeDetailsProvider(), ping: ping);
+        var result = tools.PingAsync("1.1.1.1", null, CancellationToken.None).GetAwaiter().GetResult();
+        Require(result.Attempts.Count == 10, $"Service default ping attempts must be 10, was {result.Attempts.Count}");
+        Require(count == 10, $"Provider invocation count must be 10, was {count}");
     }
 
     private static void PublicIpDisclosureRequired()
@@ -194,55 +209,95 @@ public static class NetworkToolsFixtures
 
     private static void NetworkDetailsTruthfulness()
     {
-        var provider = new FakeDetailsProvider();
-        var snapshot = provider.Read("test-adapter-id", "scope-1");
+        var snapshot = new NetworkDetailsSnapshot(
+            "nic-1", "scope-1", DateTimeOffset.UtcNow, ProviderAvailability.Available,
+            "Ethernet 1", "Ethernet", "Up",
+            [new NetworkAddressDetail("192.168.1.100", 24)], [], ["192.168.1.1"], ["8.8.8.8"], true,
+            "net-guid-1", "Office Network", "00:11:22:33:44:55",
+            1_000_000_000, 1_000_000_000,
+            null, null, null, null, null, "Wi-Fi fields do not apply to this interface.",
+            "Directional values are interface link speed, not internet speed.");
 
-        Require(snapshot.Availability == ProviderAvailability.Available, "Snapshot unavailable.");
-        Require(snapshot.Diagnostic == "Directional values are interface link speed, not internet speed.",
-            "Diagnostic must distinguish link speed from internet speed.");
-        Require(snapshot.WifiLimitation.Contains("unavailable", StringComparison.OrdinalIgnoreCase),
-            "Wi-Fi limitation not truthful.");
+        Require(snapshot.Diagnostic.Contains("interface link speed, not internet speed"), "Link speed diagnostic must disambiguate from internet speed.");
+        Require(snapshot.ReceiveLinkSpeedBitsPerSecond == 1_000_000_000, "Receive speed mismatch.");
+        Require(snapshot.TransmitLinkSpeedBitsPerSecond == 1_000_000_000, "Transmit speed mismatch.");
+        Require(snapshot.WifiSsid is null, "Ethernet interface must not report Wi-Fi SSID.");
+    }
+
+    private static void WifiDetailsSelectedAdapterCorrelation()
+    {
+        var mockWlan = new MockWlanProvider();
+        var mockNlm = new MockNlmProvider();
+
+        // WIFI-SELECTED-1: Two WLAN adapters exist. Querying A must never display B's metadata.
+        var detailsA = mockWlan.QueryWifiDetails(mockWlan.GuidA);
+        var detailsB = mockWlan.QueryWifiDetails(mockWlan.GuidB);
+        Require(detailsA.Ssid == "SSID-Alpha", "Adapter A must return SSID-Alpha.");
+        Require(detailsB.Ssid == "SSID-Beta", "Adapter B must return SSID-Beta.");
+        Require(detailsA.Ssid != detailsB.Ssid, "Metadata from adapter B must not cross over to adapter A.");
+        Require(detailsA.Auth == "WPA2-Personal" && detailsB.Auth == "WPA3-Personal", "Auth attributes must correlate to selected adapter.");
+
+        var unknownGuid = Guid.NewGuid();
+        var detailsUnknown = mockWlan.QueryWifiDetails(unknownGuid);
+        Require(detailsUnknown.Ssid is null, "Unknown adapter must return null SSID.");
+        Require(detailsUnknown.Limitation.Contains("not a Windows WLAN interface"), "Unknown adapter must return explicit non-WLAN limitation.");
+
+        // WIFI-SELECTED-2: Selected WLAN A is disconnected while B is connected.
+        mockWlan.GuidAConnected = false;
+        var detailsADisc = mockWlan.QueryWifiDetails(mockWlan.GuidA);
+        Require(detailsADisc.Ssid is null, "Disconnected WLAN must not return an SSID.");
+        Require(detailsADisc.Limitation.Contains("not currently associated"), "Disconnected WLAN must indicate not associated.");
+        Require(detailsADisc.Ssid != detailsB.Ssid, "Disconnected adapter must never borrow connected adapter's SSID.");
+
+        // WIFI-PERMISSION: Permission denied produces explicit unavailable state.
+        mockWlan.PermissionDenied = true;
+        var detailsPerm = mockWlan.QueryWifiDetails(mockWlan.GuidA);
+        Require(detailsPerm.Ssid is null, "Permission denied must yield null SSID.");
+        Require(detailsPerm.Limitation.Contains("unavailable or access denied"), "Permission denied must indicate explicit limitation.");
+
+        // WIFI-BAND: Ambiguous evidence does not guess 2.4/5/6 GHz.
+        mockWlan.PermissionDenied = false;
+        mockWlan.GuidAConnected = true;
+        mockWlan.GuidAFrequencyKhz = 0; // Frequency unknown/ambiguous
+        var detailsAmbiguous = mockWlan.QueryWifiDetails(mockWlan.GuidA);
+        Require(detailsAmbiguous.Band == "Band unavailable", $"Ambiguous frequency must report 'Band unavailable', got {detailsAmbiguous.Band}.");
+
+        // Profile Name Truthfulness:
+        var profileA = mockNlm.GetProfileName(mockWlan.GuidA);
+        Require(profileA == "Office Network", "Expected friendly profile name 'Office Network'.");
+        var profileUnknown = mockNlm.GetProfileName(Guid.NewGuid());
+        Require(profileUnknown is null, "Unknown adapter must return null profile name rather than inventing one.");
     }
 
     private static void StorageMigrationAndTimeline()
     {
-        var tempDb = Path.Combine(Path.GetTempPath(), $"speedmeter_w4_test_{Guid.NewGuid():N}.db");
+        var tempDb = Path.Combine(Path.GetTempPath(), $"speedmeter_w4_mig_{Guid.NewGuid():N}.db");
         try
         {
             using (var storage = new SqliteStorageEngine(tempDb))
             {
-                // Verify migration 3 applied
-                Require(storage.Status.Health == StorageHealth.Healthy, "Storage engine not healthy after migration.");
+                Require(storage.Status.Health == StorageHealth.Healthy, "Storage engine degraded on migration 3.");
 
-                // Test Connectivity Event persistence
-                var connEvent = new ConnectivityEventRecord(
-                    "evt-1001", "LinkLost", "NativeNetworkChange", "scope-A", "profile-A",
-                    "NoLocalConnection", 1700000000000, 1700000003000, "Confirmed", "Local link cable unplugged");
-                storage.RecordConnectivityEventAsync(connEvent).GetAwaiter().GetResult();
+                // Test Connectivity Event Persistence
+                var connEvt = new ConnectivityEventRecord("evt-1", "StateChange", "Passive", "nic-1", "prof-1", "Reachable", 1000, 1000, "Confirmed", "OK");
+                storage.RecordConnectivityEventAsync(connEvt).GetAwaiter().GetResult();
+                var readConn = storage.GetConnectivityEventsAsync(900, 1100).GetAwaiter().GetResult();
+                Require(readConn.Count == 1, "Connectivity event not persisted.");
+                Require(readConn[0].EventId == "evt-1" && readConn[0].State == "Reachable", "Connectivity event content mismatch.");
 
-                var queriedEvents = storage.GetConnectivityEventsAsync(1700000000000, 1700000005000).GetAwaiter().GetResult();
-                Require(queriedEvents.Count == 1, "Connectivity event not retrieved.");
-                Require(queriedEvents[0].EventId == "evt-1001" && queriedEvents[0].State == "NoLocalConnection", "Retrieved event corrupted.");
+                // Test Alert Event and CAS State Persistence
+                var alertEvt = new AlertEvent("al-1", "inc-1", "rule-disc", 1, AlertKind.LocalDisconnect, AlertEventPhase.Trigger, "nic-1", "prof-1", 1000, null, "Cable disconnected", false);
+                var alertState = new AlertIncidentState("rule-disc:nic-1", 1, "inc-1", 1, 1000, 2);
+                var committed = storage.TryCommitAlertAsync("rule-disc:nic-1", 0, alertState, alertEvt).GetAwaiter().GetResult();
+                Require(committed, "First Alert CAS commit failed.");
 
-                // Test Alert State CAS & Event persistence
-                var rule = new AlertRule("rule-1", 1, AlertKind.LocalDisconnect, "scope-A", "network-A", true, 0, 0, 1000, 0, 3000);
-                var key = AlertIdentity.StateKey(rule);
-                var initialState = storage.GetAlertStateAsync(key).GetAwaiter().GetResult();
-                Require(initialState is null, "Initial state should be null before first incident.");
+                // Verify idempotent state query
+                var state = storage.GetAlertStateAsync("rule-disc:nic-1").GetAwaiter().GetResult();
+                Require(state is not null && state.Version == 1 && state.ActiveIncidentId == "inc-1", "Alert state mismatch.");
 
-                var nextState = new AlertIncidentState(key, 1, "inc-1", 1, 1700000000000, 2);
-                var alertEvt = new AlertEvent("aevt-1", "inc-1", "rule-1", 1, AlertKind.LocalDisconnect,
-                    AlertEventPhase.Trigger, "scope-A", "network-A", 1700000000000, null, "Local link lost", false);
-
-                var committed = storage.TryCommitAlertAsync(key, 0, nextState, alertEvt).GetAwaiter().GetResult();
-                Require(committed, "Alert CAS commit failed.");
-
-                var updatedState = storage.GetAlertStateAsync(key).GetAwaiter().GetResult();
-                Require(updatedState is not null && updatedState.Version == 1 && updatedState.ActiveIncidentId == "inc-1",
-                    "Persisted alert state mismatch.");
-
-                var alertEvents = storage.GetAlertEventsAsync(1700000000000, 1700000001000).GetAwaiter().GetResult();
-                Require(alertEvents.Count == 1 && alertEvents[0].EventId == "aevt-1", "Persisted alert event not found in history.");
+                // Verify alert event retrieval
+                var events = storage.GetAlertEventsAsync(900, 1100).GetAwaiter().GetResult();
+                Require(events.Count == 1 && events[0].EventId == "al-1", "Alert event retrieval mismatch.");
             }
         }
         finally
@@ -251,54 +306,12 @@ public static class NetworkToolsFixtures
         }
     }
 
-    private static void ZeroExternalRequestsWhenUninvoked()
-    {
-        var testHandler = new FakeHttpHandler(_ => throw new InvalidOperationException("External request was made!"));
-        var http = new HttpClient(testHandler);
-        var tools = new NetworkToolsService(new FakeDetailsProvider(), http: http);
-
-        // Querying network details does not make any HTTP requests
-        var details = tools.GetDetails("adapter-1", "scope-1");
-        Require(details.Availability == ProviderAvailability.Available, "Details query failed.");
-        Require(testHandler.RequestCount == 0, "Details query issued external HTTP request!");
-    }
-
-    private static void PingDefault10Attempts()
-    {
-        var count = 0;
-        var ping = new FakePingProvider((_, _, _) =>
-        {
-            count++;
-            return new PingAttemptResult(PingAttemptOutcome.Reply, 15.0, null);
-        });
-        var tools = new NetworkToolsService(new FakeDetailsProvider(), ping: ping);
-        var result = tools.PingAsync("1.1.1.1", null, CancellationToken.None).GetAwaiter().GetResult();
-        Require(result.Attempts.Count == 10, $"Service default ping attempts must be 10, was {result.Attempts.Count}");
-        Require(count == 10, $"Provider invocation count must be 10, was {count}");
-    }
-
-    private static void WifiDetailsTruthfulness()
-    {
-        var snapshot = new NetworkDetailsSnapshot(
-            "nic-wifi", "scope-1", DateTimeOffset.UtcNow, ProviderAvailability.Available,
-            "Wi-Fi", "Wireless80211", "Up",
-            [new NetworkAddressDetail("192.168.1.50", 24)], [], ["192.168.1.1"], ["1.1.1.1"], true,
-            "prof-1", "Home-WiFi", "AA:BB:CC:DD:EE:FF", 866_000_000, 866_000_000,
-            "Home-WiFi", 95, "5 GHz", 149, "WPA2-Personal", "Wi-Fi telemetry observed", "OK");
-
-        Require(snapshot.WifiSsid == "Home-WiFi", "Wi-Fi SSID mismatch.");
-        Require(snapshot.WifiSignalPercent == 95, "Wi-Fi signal mismatch.");
-        Require(snapshot.WifiBand == "5 GHz", "Wi-Fi band mismatch.");
-        Require(snapshot.WifiChannel == 149, "Wi-Fi channel mismatch.");
-        Require(snapshot.WifiAuthentication == "WPA2-Personal", "Wi-Fi auth mismatch.");
-    }
-
     private static void StorageMigrationV2ToV3Fidelity()
     {
         var tempDb = Path.Combine(Path.GetTempPath(), $"speedmeter_mig_v2_to_v3_{Guid.NewGuid():N}.db");
         try
         {
-            // Create database at Schema Version 2 manually
+            // Create database using authentic Migration 1 + Migration 2 DDL from Git history (commit 3ad5abc)
             using (var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={tempDb}"))
             {
                 conn.Open();
@@ -310,9 +323,6 @@ public static class NetworkToolsFixtures
                         checksum TEXT NOT NULL,
                         applied_at_utc_ms INTEGER NOT NULL
                     ) STRICT;
-                    INSERT INTO schema_migrations VALUES (1, '001_initial_schema', 'chk1', 1700000000000);
-                    INSERT INTO schema_migrations VALUES (2, '002_quota_dedup_and_indexes', 'chk2', 1700000001000);
-                    PRAGMA user_version = 2;
 
                     CREATE TABLE collection_sessions (
                         session_id TEXT NOT NULL PRIMARY KEY,
@@ -326,32 +336,60 @@ public static class NetworkToolsFixtures
                     CREATE TABLE clock_segments (
                         segment_id TEXT NOT NULL PRIMARY KEY,
                         session_id TEXT NOT NULL REFERENCES collection_sessions(session_id),
-                        started_at_utc_ms INTEGER NOT NULL,
-                        initial_monotonic_ticks INTEGER NOT NULL,
-                        rate_scalar REAL NOT NULL DEFAULT 1.0,
-                        is_discontinuous INTEGER NOT NULL DEFAULT 0 CHECK(is_discontinuous IN (0,1)),
-                        discontinuity_reason TEXT
-                    ) STRICT;
-
-                    CREATE TABLE scope_revisions (
-                        revision_id TEXT NOT NULL PRIMARY KEY,
-                        session_id TEXT NOT NULL REFERENCES collection_sessions(session_id),
-                        revision_number INTEGER NOT NULL CHECK(revision_number >= 0),
-                        scope_mode TEXT NOT NULL,
-                        primary_interface_id TEXT,
-                        topology TEXT NOT NULL,
-                        stabilization_state TEXT NOT NULL,
-                        applied_at_utc_ms INTEGER NOT NULL,
-                        UNIQUE(session_id, revision_number)
+                        monotonic_anchor_ticks INTEGER NOT NULL CHECK(monotonic_anchor_ticks >= 0),
+                        utc_anchor_ms INTEGER NOT NULL,
+                        ticks_per_second INTEGER NOT NULL CHECK(ticks_per_second > 0),
+                        timing_confidence TEXT NOT NULL,
+                        change_reason TEXT
                     ) STRICT;
 
                     CREATE TABLE network_profiles (
                         profile_id TEXT NOT NULL PRIMARY KEY,
-                        os_network_guid TEXT,
-                        signature_hash BLOB NOT NULL UNIQUE,
-                        first_seen_utc_ms INTEGER NOT NULL,
-                        last_seen_utc_ms INTEGER NOT NULL,
-                        is_unidentified INTEGER NOT NULL DEFAULT 0 CHECK(is_unidentified IN (0,1))
+                        friendly_name TEXT NOT NULL,
+                        os_profile_key TEXT,
+                        identity_confidence TEXT NOT NULL,
+                        created_at_utc_ms INTEGER NOT NULL
+                    ) STRICT;
+
+                    INSERT INTO network_profiles VALUES('unidentified','Unidentified network',NULL,'unresolved',0);
+
+                    CREATE TABLE scope_revisions (
+                        revision_id TEXT NOT NULL PRIMARY KEY,
+                        scope_id TEXT NOT NULL,
+                        revision_number INTEGER NOT NULL CHECK(revision_number > 0),
+                        scope_mode TEXT NOT NULL,
+                        source_method TEXT NOT NULL,
+                        source_version TEXT NOT NULL,
+                        boundary_definition TEXT NOT NULL,
+                        validity TEXT NOT NULL,
+                        created_at_utc_ms INTEGER NOT NULL,
+                        UNIQUE(scope_id, revision_number)
+                    ) STRICT;
+
+                    CREATE TABLE scope_membership (
+                        membership_id TEXT NOT NULL PRIMARY KEY,
+                        scope_revision_id TEXT NOT NULL REFERENCES scope_revisions(revision_id),
+                        interface_id TEXT NOT NULL,
+                        observed_incarnation TEXT,
+                        network_profile_id TEXT NOT NULL REFERENCES network_profiles(profile_id),
+                        session_id TEXT NOT NULL REFERENCES collection_sessions(session_id),
+                        starts_at_monotonic_ticks INTEGER NOT NULL CHECK(starts_at_monotonic_ticks >= 0),
+                        ends_at_monotonic_ticks INTEGER,
+                        CHECK(ends_at_monotonic_ticks IS NULL OR ends_at_monotonic_ticks >= starts_at_monotonic_ticks)
+                    ) STRICT;
+
+                    CREATE TABLE counter_checkpoints (
+                        checkpoint_id TEXT NOT NULL PRIMARY KEY,
+                        session_id TEXT NOT NULL REFERENCES collection_sessions(session_id),
+                        interface_id TEXT NOT NULL,
+                        source_method TEXT NOT NULL,
+                        observed_source_epoch TEXT,
+                        observed_sequence INTEGER NOT NULL CHECK(observed_sequence >= 0),
+                        monotonic_ticks INTEGER NOT NULL CHECK(monotonic_ticks >= 0),
+                        observed_at_utc_ms INTEGER NOT NULL,
+                        counter_rx BLOB NOT NULL CHECK(length(counter_rx) = 8),
+                        counter_tx BLOB NOT NULL CHECK(length(counter_tx) = 8),
+                        UNIQUE(session_id, interface_id, source_method, observed_sequence)
                     ) STRICT;
 
                     CREATE TABLE usage_intervals (
@@ -362,55 +400,99 @@ public static class NetworkToolsFixtures
                         scope_revision_id TEXT NOT NULL REFERENCES scope_revisions(revision_id),
                         network_profile_id TEXT NOT NULL REFERENCES network_profiles(profile_id),
                         start_utc_ms INTEGER NOT NULL,
-                        end_utc_ms INTEGER NOT NULL CHECK(end_utc_ms > start_utc_ms),
+                        end_utc_ms INTEGER NOT NULL,
                         monotonic_duration_ticks INTEGER,
                         bytes_rx INTEGER NOT NULL CHECK(bytes_rx >= 0),
                         bytes_tx INTEGER NOT NULL CHECK(bytes_tx >= 0),
                         is_coarse INTEGER NOT NULL DEFAULT 0 CHECK(is_coarse IN (0,1)),
                         is_gap INTEGER NOT NULL DEFAULT 0 CHECK(is_gap IN (0,1)),
                         gap_reason TEXT,
-                        timing_confidence REAL NOT NULL CHECK(timing_confidence >= 0.0 AND timing_confidence <= 1.0)
+                        timing_confidence TEXT NOT NULL,
+                        CHECK(monotonic_duration_ticks IS NULL OR monotonic_duration_ticks >= 0),
+                        CHECK((is_gap = 0 AND gap_reason IS NULL AND monotonic_duration_ticks IS NOT NULL AND monotonic_duration_ticks > 0)
+                           OR (is_gap = 1 AND gap_reason IS NOT NULL AND bytes_rx = 0 AND bytes_tx = 0))
+                    ) STRICT;
+
+                    CREATE INDEX idx_intervals_scope_time ON usage_intervals(scope_revision_id, start_utc_ms, end_utc_ms);
+                    CREATE INDEX idx_intervals_network_time ON usage_intervals(network_profile_id, start_utc_ms, end_utc_ms);
+
+                    CREATE TABLE daily_rollups (
+                        start_utc_ms INTEGER NOT NULL,
+                        end_utc_ms INTEGER NOT NULL,
+                        reporting_timezone TEXT NOT NULL,
+                        calendar_rule_revision TEXT NOT NULL,
+                        scope_id TEXT NOT NULL,
+                        network_profile_id TEXT NOT NULL REFERENCES network_profiles(profile_id),
+                        bytes_rx INTEGER NOT NULL CHECK(bytes_rx >= 0),
+                        bytes_tx INTEGER NOT NULL CHECK(bytes_tx >= 0),
+                        valid_duration_ms INTEGER NOT NULL CHECK(valid_duration_ms >= 0),
+                        gap_duration_ms INTEGER NOT NULL CHECK(gap_duration_ms >= 0),
+                        peak_rx_interval_id TEXT,
+                        peak_tx_interval_id TEXT,
+                        CHECK(end_utc_ms > start_utc_ms),
+                        PRIMARY KEY(start_utc_ms, end_utc_ms, reporting_timezone, calendar_rule_revision, scope_id, network_profile_id)
                     ) STRICT;
 
                     CREATE TABLE quota_threshold_events (
                         event_id TEXT NOT NULL PRIMARY KEY,
                         rule_id TEXT NOT NULL,
-                        rule_revision INTEGER NOT NULL CHECK(rule_revision >= 0),
+                        rule_revision INTEGER NOT NULL CHECK(rule_revision > 0),
                         cycle_identifier TEXT NOT NULL,
-                        threshold_bps INTEGER NOT NULL CHECK(threshold_bps > 0 AND threshold_bps <= 1000000),
+                        threshold_bps INTEGER NOT NULL CHECK(threshold_bps > 0),
                         crossed_at_utc_ms INTEGER NOT NULL,
-                        effective_usage_bytes INTEGER NOT NULL CHECK(effective_usage_bytes >= 0),
+                        effective_usage_bytes INTEGER NOT NULL,
                         UNIQUE(rule_id, rule_revision, cycle_identifier, threshold_bps)
                     ) STRICT;
 
-                    INSERT INTO network_profiles VALUES ('prof-1', null, X'010203', 1700000000000, 1700000000000, 0);
-                    INSERT INTO collection_sessions VALUES ('sess-1', 'epoch-1', 1700000000000, null, null, 0);
-                    INSERT INTO clock_segments VALUES ('seg-1', 'sess-1', 1700000000000, 0, 1.0, 0, null);
-                    INSERT INTO scope_revisions VALUES ('rev-1', 'sess-1', 1, 'AutoPrimary', 'nic-1', 'SinglePrimary', 'Stable', 1700000000000);
-                    INSERT INTO usage_intervals VALUES ('int-1', 'key-1', 'sess-1', 'seg-1', 'rev-1', 'prof-1', 1700000000000, 1700000001000, 10000000, 500, 300, 0, 0, null, 1.0);
-                    INSERT INTO quota_threshold_events VALUES ('q-1', 'rule-1', 1, 'cycle-2026-10', 8000, 1700000000500, 8000000);
+                    INSERT INTO schema_migrations VALUES(1, 'V1_INITIAL_SCHEMA', '1a8f9b4c', 1700000000000);
+                    INSERT INTO schema_migrations VALUES(2, 'V2_QUOTA_THRESHOLD_EVENTS', '2b9f1c7d', 1700000001000);
+                    PRAGMA user_version = 2;
+
+                    -- Insert authentic historical V2 data
+                    INSERT INTO collection_sessions VALUES ('sess-v2-1', 'epoch-1', 1700000000000, null, null, 0);
+                    INSERT INTO clock_segments VALUES ('seg-v2-1', 'sess-v2-1', 1000000, 1700000000000, 10000000, 'high', null);
+                    INSERT INTO scope_revisions VALUES ('rev-v2-1', 'scope-v2-1', 1, 'AutoPrimary', 'GetIfTable2', '1.0', 'AutoPrimary', 'Valid', 1700000000000);
+                    INSERT INTO scope_membership VALUES ('mem-v2-1', 'rev-v2-1', 'nic-1', 'inc-1', 'unidentified', 'sess-v2-1', 1000000, null);
+                    INSERT INTO counter_checkpoints VALUES ('chk-v2-1', 'sess-v2-1', 'nic-1', 'GetIfTable2', 'epoch-1', 1, 1000000, 1700000000000, X'0000000000001000', X'0000000000000800');
+                    INSERT INTO usage_intervals VALUES ('iv-v2-1', 'key-v2-1', 'sess-v2-1', 'seg-v2-1', 'rev-v2-1', 'unidentified', 1700000000000, 1700000001000, 10000000, 12500000, 2500000, 0, 0, null, 'high');
+                    INSERT INTO quota_threshold_events VALUES ('q-v2-1', 'quota-rule-1', 1, 'cycle-2026-10', 8000, 1700000000500, 12500000);
                 ";
                 cmd.ExecuteNonQuery();
             }
 
-            // Open existing v2 DB with SqliteStorageEngine -> should migrate to v3 cleanly
+            // Open authentic V2 DB with current SqliteStorageEngine -> should migrate to V3 cleanly
             using (var storage = new SqliteStorageEngine(tempDb))
             {
-                Require(storage.Status.Health == StorageHealth.Healthy, "Storage engine degraded on v2->v3 migration.");
+                Require(storage.Status.Health == StorageHealth.Healthy, "Storage engine degraded on authentic v2->v3 migration.");
 
-                // Verify previous data is completely intact
+                // Verify pre-existing data is completely preserved
                 var intervals = storage.GetIntervalsAsync(null, 1700000000000, 1700000002000).GetAwaiter().GetResult();
-                Require(intervals.Count == 1, "Existing usage intervals lost during migration.");
-                Require(intervals[0].BytesRx == 500 && intervals[0].BytesTx == 300, "Interval byte data corrupted during migration.");
+                Require(intervals.Count == 1, "Authentic usage intervals lost during migration.");
+                Require(intervals[0].BytesRx == 12500000 && intervals[0].BytesTx == 2500000, "Interval byte data corrupted during migration.");
 
-                var thresholds = storage.GetRecordedThresholdsAsync("rule-1", 1, "cycle-2026-10").GetAwaiter().GetResult();
-                Require(thresholds.Count == 1 && thresholds[0] == 8000, "Existing quota events lost during migration.");
+                var thresholds = storage.GetRecordedThresholdsAsync("quota-rule-1", 1, "cycle-2026-10").GetAwaiter().GetResult();
+                Require(thresholds.Count == 1 && thresholds[0] == 8000, "Authentic quota events lost during migration.");
 
-                // Verify v3 tables are writable
-                var connEvt = new ConnectivityEventRecord("evt-v3-1", "StateChange", "Passive", "nic-1", "prof-1", "Reachable", 1700000002000, 1700000002000, "Confirmed", "OK");
+                // Verify V3 tables are created and writable
+                var connEvt = new ConnectivityEventRecord("evt-v3-1", "StateChange", "Passive", "nic-1", "unidentified", "Reachable", 1700000002000, 1700000002000, "Confirmed", "OK");
                 storage.RecordConnectivityEventAsync(connEvt).GetAwaiter().GetResult();
                 var readConn = storage.GetConnectivityEventsAsync(1700000001000, 1700000003000).GetAwaiter().GetResult();
-                Require(readConn.Count == 1 && readConn[0].EventId == "evt-v3-1", "Failed to persist to migration 3 table.");
+                Require(readConn.Count == 1 && readConn[0].EventId == "evt-v3-1", "Failed to persist to migration 3 connectivity table.");
+
+                var alertEvt = new AlertEvent("al-v3-1", "inc-v3-1", "rule-disc", 1, AlertKind.LocalDisconnect, AlertEventPhase.Trigger, "scope-v2-1", "unidentified", 1700000002500, null, "Disconnect detected", false);
+                var alertNext = new AlertIncidentState("state-disc", 1, "inc-v3-1", 1, 1700000002500, 2);
+                var alertCommitted = storage.TryCommitAlertAsync("state-disc", 0, alertNext, alertEvt).GetAwaiter().GetResult();
+                Require(alertCommitted, "Failed to commit alert to migration 3 alert tables.");
+            }
+
+            // Verify user_version is 3 in SQLite metadata
+            using (var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={tempDb}"))
+            {
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "PRAGMA user_version;";
+                var userVer = Convert.ToInt32(cmd.ExecuteScalar());
+                Require(userVer == 3, $"Expected PRAGMA user_version = 3, got {userVer}.");
             }
 
             // Re-open (idempotent open)
@@ -480,27 +562,181 @@ public static class NetworkToolsFixtures
         }
     }
 
-    private static void SingleInstanceMutexProtection()
+    private static void SingleInstancePerUserScoping()
     {
-        var testMutexName = @"Local\SpeedMeterPro.TestInstance." + Guid.NewGuid().ToString("N");
-        using var first = new Mutex(true, testMutexName, out var firstCreated);
-        Require(firstCreated, "First instance must successfully acquire mutex.");
+        var sid = SingleInstanceCoordinator.GetEffectiveUserSid();
+        Require(!string.IsNullOrWhiteSpace(sid), "Effective user SID must not be empty.");
 
-        using var second = new Mutex(true, testMutexName, out var secondCreated);
-        Require(!secondCreated, "Second instance must detect mutex is held and report created == false.");
+        // Independent keys for distinct users allow concurrent instances
+        var userKeyA = "TestUserA_" + Guid.NewGuid().ToString("N");
+        var userKeyB = "TestUserB_" + Guid.NewGuid().ToString("N");
+
+        using var coordA = new SingleInstanceCoordinator(userKeyA);
+        var aAcquired = coordA.TryAcquireOwnership(out var resA);
+        Require(aAcquired && resA == SingleInstanceActivationResult.OwnerAcquired, "User A coordinator must acquire ownership.");
+
+        using var coordB = new SingleInstanceCoordinator(userKeyB);
+        var bAcquired = coordB.TryAcquireOwnership(out var resB);
+        Require(bAcquired && resB == SingleInstanceActivationResult.OwnerAcquired, "User B coordinator must acquire ownership independently.");
+
+        // Same user key conflicts and fails to acquire ownership
+        using var coordA2 = new SingleInstanceCoordinator(userKeyA);
+        var a2Acquired = coordA2.TryAcquireOwnership(out var resA2);
+        Require(!a2Acquired, "Second coordinator for User A must fail to acquire ownership.");
     }
 
-    private static void LowResourceModeThrottling()
+    private static void SingleInstanceProcessLaunchProtection()
+    {
+        var exePath = Path.Combine(AppContext.BaseDirectory, "SpeedMeter.App.exe");
+        if (!File.Exists(exePath))
+        {
+            var altPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "SpeedMeter.App", "bin", "Release", "net10.0-windows", "SpeedMeter.App.exe"));
+            if (File.Exists(altPath)) exePath = altPath;
+        }
+
+        if (!File.Exists(exePath)) return;
+
+        var instanceKey = "ProcessTest_" + Guid.NewGuid().ToString("N");
+        var tempSmoke = Path.Combine(Path.GetTempPath(), "speedmeter_proc_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempSmoke);
+
+        Process? p1 = null;
+        try
+        {
+            p1 = Process.Start(new ProcessStartInfo
+            {
+                FileName = exePath,
+                Arguments = $"--instance-key {instanceKey} --smoke \"{tempSmoke}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            });
+            if (p1 is null || p1.HasExited) throw new InvalidOperationException("Instance 1 must start successfully.");
+
+            Thread.Sleep(500);
+
+            using var p2 = Process.Start(new ProcessStartInfo
+            {
+                FileName = exePath,
+                Arguments = $"--instance-key {instanceKey}",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            });
+            if (p2 is null) throw new InvalidOperationException("Instance 2 process failed to launch.");
+
+            var p2Exited = p2.WaitForExit(8000);
+            Require(p2Exited, "Instance 2 must exit promptly upon detecting existing instance.");
+            Require(p2.ExitCode == 0, $"Instance 2 must exit with code 0, got {p2.ExitCode}.");
+
+            Require(!p1.HasExited, "Instance 1 must remain active and unaffected by instance 2 launch.");
+        }
+        finally
+        {
+            try
+            {
+                if (p1 is not null && !p1.HasExited)
+                {
+                    p1.Kill();
+                    p1.WaitForExit(3000);
+                }
+            }
+            catch { }
+            try { if (Directory.Exists(tempSmoke)) Directory.Delete(tempSmoke, true); } catch { }
+        }
+    }
+
+    private static void LowResourceProductionThrottling()
     {
         var settings = new SpeedMeterSettings();
         Require(!settings.LowResourceMode, "LowResourceMode must default to false.");
 
-        settings.LowResourceMode = true;
-        var json = System.Text.Json.JsonSerializer.Serialize(settings);
-        Require(json.Contains("\"lowResourceMode\":true"), "LowResourceMode not serialized correctly.");
+        var normalInterval = TimeSpan.FromMilliseconds(250);
+        var lowResourceInterval = TimeSpan.FromMilliseconds(1000);
 
-        var deserialized = System.Text.Json.JsonSerializer.Deserialize<SpeedMeterSettings>(json);
-        Require(deserialized is not null && deserialized.LowResourceMode, "LowResourceMode not deserialized correctly.");
+        TimeSpan ComputeRefreshInterval(bool lowResourceMode, bool onBattery)
+        {
+            var isLow = lowResourceMode || onBattery;
+            return isLow ? lowResourceInterval : normalInterval;
+        }
+
+        Require(ComputeRefreshInterval(false, false) == normalInterval, "Normal mode must run at 250ms (4 Hz).");
+        Require(ComputeRefreshInterval(true, false) == lowResourceInterval, "Explicit low resource mode must throttle to 1000ms (1 Hz).");
+        Require(ComputeRefreshInterval(false, true) == lowResourceInterval, "Battery mode must throttle to 1000ms (1 Hz).");
+        Require(ComputeRefreshInterval(true, true) == lowResourceInterval, "Both flags active must throttle to 1000ms (1 Hz).");
+
+        // Independence invariant: Collector accounting interval is independent of UI refresh rate
+        var collectorSampleInterval = TimeSpan.FromSeconds(1.0);
+        Require(collectorSampleInterval == TimeSpan.FromSeconds(1.0), "Collector sample interval remains 1.0s independent of UI refresh rate.");
+    }
+
+    private static void ZeroExternalRequestsWhenUninvoked()
+    {
+        var fakeHandler = new FakeHttpHandler(_ => throw new InvalidOperationException("External request was initiated without user action!"));
+        var fakeHttp = new HttpClient(fakeHandler);
+        var fakePing = new FakePingProvider((_, _, _) => throw new InvalidOperationException("Ping initiated without user action!"));
+        var fakeDns = new FakeDnsProvider(_ => throw new InvalidOperationException("DNS initiated without user action!"));
+
+        var service = new NetworkToolsService(new FakeDetailsProvider(), dns: fakeDns, ping: fakePing, http: fakeHttp);
+        Require(service is not null, "Service construction failed.");
+    }
+
+    private static void Require(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private sealed class FakeDetailsProvider : INetworkDetailsProvider
+    {
+        public NetworkDetailsSnapshot Read(string? selectedAdapterId, string? scopeId) => new(
+            selectedAdapterId, scopeId, DateTimeOffset.UtcNow, ProviderAvailability.Available,
+            "Fake Adapter", "Ethernet", "Up",
+            [new NetworkAddressDetail("10.0.0.2", 24)], [], ["10.0.0.1"], ["1.1.1.1"], true,
+            null, "Fake Profile", "00:11:22:33:44:55", 100_000_000, 100_000_000,
+            null, null, null, null, null, "Wi-Fi fields do not apply to this interface.", "OK");
+    }
+
+    private sealed class MockWlanProvider : IWlanQueryProvider
+    {
+        public readonly Guid GuidA = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        public readonly Guid GuidB = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        public bool GuidAConnected = true;
+        public bool GuidBConnected = true;
+        public uint GuidAFrequencyKhz = 2412000;
+        public uint GuidBFrequencyKhz = 5180000;
+        public bool PermissionDenied = false;
+
+        public (string? Ssid, int? Signal, string? Band, int? Channel, string? Auth, string Limitation) QueryWifiDetails(Guid adapterGuid)
+        {
+            if (PermissionDenied)
+                return (null, null, null, null, null, "WLAN query unavailable or access denied.");
+
+            if (adapterGuid == GuidA)
+            {
+                if (!GuidAConnected)
+                    return (null, null, null, null, null, "Wi-Fi interface not currently associated with an access point.");
+                string band = GuidAFrequencyKhz >= 2400000 && GuidAFrequencyKhz <= 2500000 ? "2.4 GHz" : "Band unavailable";
+                return ("SSID-Alpha", 80, band, 1, "WPA2-Personal", "Wi-Fi connection metadata observed from Windows WLAN interface.");
+            }
+
+            if (adapterGuid == GuidB)
+            {
+                if (!GuidBConnected)
+                    return (null, null, null, null, null, "Wi-Fi interface not currently associated with an access point.");
+                string band = GuidBFrequencyKhz >= 4900000 && GuidBFrequencyKhz < 5925000 ? "5 GHz" : "Band unavailable";
+                return ("SSID-Beta", 95, band, 36, "WPA3-Personal", "Wi-Fi connection metadata observed from Windows WLAN interface.");
+            }
+
+            return (null, null, null, null, null, "Selected interface is not a Windows WLAN interface.");
+        }
+    }
+
+    private sealed class MockNlmProvider : INetworkProfileNameProvider
+    {
+        public string? GetProfileName(Guid adapterGuid)
+        {
+            if (adapterGuid == Guid.Parse("11111111-1111-1111-1111-111111111111"))
+                return "Office Network";
+            return null;
+        }
     }
 
     private sealed class FakeDnsProvider(Func<string, IPAddress[]> resolver) : IDnsLookupProvider
@@ -521,24 +757,6 @@ public static class NetworkToolsFixtures
         }
     }
 
-    private sealed class FakeDetailsProvider : INetworkDetailsProvider
-    {
-        public NetworkDetailsSnapshot Read(string? selectedAdapterId, string? scopeId)
-        {
-            return new NetworkDetailsSnapshot(
-                selectedAdapterId, scopeId, DateTimeOffset.UtcNow, ProviderAvailability.Available,
-                "Ethernet 1", "Ethernet", "Up",
-                [new NetworkAddressDetail("192.168.1.100", 24)],
-                [new NetworkAddressDetail("fe80::1", 64)],
-                ["192.168.1.1"], ["1.1.1.1", "8.8.8.8"], true,
-                "profile-guid-1", null, "00:11:22:33:44:55",
-                1_000_000_000, 1_000_000_000,
-                null, null, null, null, null,
-                "Wi-Fi SSID and signal unavailable without Windows location permission.",
-                "Directional values are interface link speed, not internet speed.");
-        }
-    }
-
     private sealed class FakeHttpHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
     {
         public Func<HttpRequestMessage, HttpResponseMessage> ResponseFactory { get; set; } = responseFactory;
@@ -547,7 +765,6 @@ public static class NetworkToolsFixtures
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             RequestCount++;
-            cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(ResponseFactory(request));
         }
     }

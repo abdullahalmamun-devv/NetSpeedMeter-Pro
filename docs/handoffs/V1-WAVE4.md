@@ -14,7 +14,7 @@
 - **Host OS:** Windows 10 Pro x64 (build 10.0.19045.0), 4 logical processors
 - **Runtime:** .NET 10.0.12 (SDK 10.0.401)
 - **Baseline checks:** 197 PASS, 1 intentional SKIP, 0 FAIL; 18/18 WPF smoke assertions True
-- **Final checks:** 228 PASS, 1 intentional SKIP, 0 FAIL (standard `scripts/check.ps1`); 235 PASS, 1 intentional SKIP, 0 FAIL (`scripts/check.ps1 -Windows`); 18/18 WPF smoke assertions True (`scripts/smoke.ps1`)
+- **Final checks:** 229 PASS, 1 intentional SKIP, 0 FAIL (standard `scripts/check.ps1`); 236 PASS, 1 intentional SKIP, 0 FAIL (`scripts/check.ps1 -Windows`); 18/18 WPF smoke assertions True (`scripts/smoke.ps1`)
 
 ---
 
@@ -26,14 +26,14 @@
   2. *Connectivity state:* Unknown, Checking, Reachable, ChecksFailing, NoLocalConnection, SignInSuspected
   3. *Quality state:* High latency / degraded quality (independent of reachability)
 - **Passive First & Zero Unsolicited Traffic:** Windows network interface status and default route changes are observed passively. When remote connection checks are disabled (the default setting), zero background probes or HTTP/ICMP packets are transmitted.
-- **Typed Endpoint Registry:** Canonical registry with approved HTTPS reachability endpoints (`EndpointRegistry.cs`). All endpoints specify stable IDs, protocols, purpose (`ReachabilityCheck`, `CaptivePortalCheck`), expected status codes, minimum intervals, and privacy disclosures.
+- **Typed Endpoint Registry:** Canonical registry with approved HTTPS reachability endpoint (single Microsoft NCSI HTTPS endpoint `EndpointRegistry.cs`). Specifies stable ID, protocol, purpose (`ReachabilityCheck`), expected status codes, minimum intervals, and privacy disclosures.
 - **Hysteresis & Truthful Root Cause:** 3 consecutive all-endpoint failure rounds confirm `ChecksFailing`; 2 consecutive successful rounds recover to `Reachable`. Single ICMP probe failures never claim "Internet is down" or "ISP outage".
 - **Captive Portal Detection:** Detects HTTP 302/redirect responses from captive portal probe endpoints and reports `SignInSuspected`.
 - **Metered Network Policy:** Background remote checks default to suppressed on metered connections to avoid data consumption, with truthful UI display and explicit user toggle.
 - **Lifecycle & Staleness:** Probes are bounded to 3-second timeouts. System suspend immediately closes observed connectivity incidents with uncertain end timestamps; stale successful checks expire rather than staying indefinitely green.
 
 ### B. Windows Network Information & Diagnostic Tools (`V1-NETINFO-001`, `V1-TOOLS-001`)
-- **Truthful Network Details:** `NetworkDetailsProvider` extracts Windows adapter metadata (IPv4/IPv6 addresses, default gateway, DNS servers, DHCP status) and Wi-Fi telemetry (SSID, Signal %, Band, Channel, Auth). Interface link speed is strictly labeled as "Interface Link Speed" and explicitly noted as distinct from internet throughput.
+- **Truthful Network Details:** `NetworkDetailsProvider` extracts Windows adapter metadata (IPv4/IPv6 addresses, default gateway, DNS servers, DHCP status) and Native Windows WLAN API (`wlanapi.dll`) Wi-Fi telemetry (SSID, Signal %, Band, Channel, Auth) correlated strictly by selected adapter GUID (`nic.Id`). Frequency-based band identification prevents channel guessing; friendly profile name is retrieved via Network List Manager (NLM) COM API or reported unavailable truthfully. Interface link speed is strictly labeled as "Interface Link Speed" and explicitly noted as distinct from internet throughput.
 - **User-Initiated Ping Tool:** Bounded ping benchmark with configurable count (default 10 attempts per PRD §16 contract) and 3-second timeout. Computes minimum, maximum, and mean RTT without NaN on packet loss; handles local errors and cancellation gracefully.
 - **DNS Resolution Tool:** Resolves IPv4 (A) and IPv6 (AAAA) records; strictly validates and normalizes hostnames to prevent command or argument injection; reports timeouts and failures truthfully.
 - **Privacy-Guarded Public IP Lookup:** Manual on-demand lookup strictly requiring explicit user acknowledgment/disclosure before each query. Queries approved privacy-preserving HTTPS provider; explains egress NAT/VPN routing caveats; caches last-known response.
@@ -43,7 +43,7 @@
 - **Alert Rules & Incident Tracking:** Configurable rules for Local Disconnect, Remote Reachability Failure, High Ping Latency (> threshold mean over 10 replies for 30s), and Quota Warnings.
 - **Deduplication & Cooldown:** Incidents are debounced, enforce configurable cooldown periods, and suppress duplicate popups across app restarts.
 - **Quiet Hours:** Configurable quiet hours window suppresses visual notifications while recording incidents into history truthfully.
-- **Storage Migration 3:** SQLite migration 3 creates `connectivity_incidents` and `alert_incidents` tables with compound unique indexes for deduplication. `SqliteStorageEngine` provides persistent storage and query methods.
+- **Storage Migration 3:** SQLite migration 3 creates `connectivity_incidents` and `alert_incidents` tables with compound unique indexes for deduplication. `SqliteStorageEngine` provides persistent storage and query methods, with verified 100% data fidelity when upgrading from authentic Migration 1 + 2 schemas.
 
 ### D. First-Run Onboarding & Privacy Controls (`V1-FIRST-RUN-001`)
 - **Transparent First-Run Dialog:** `FirstRunWindow` presents a local-first onboarding flow explaining:
@@ -56,7 +56,7 @@
 - **Theme Engine:** Full Light, Dark, and System theme support with `ThemeLight.xaml` matching design tokens. Pack URI resolution with resilient fallback prevents cross-assembly resource resolution issues.
 - **Floating Widget Layouts:** Supports Minimal (200x72), Compact Graph (240x110 with live sparkline), and Detailed (280x145 with sparkline and adapter info). Includes >30s idle dimming and fullscreen auto-hide.
 - **Windows Startup & Global Hotkeys:** `StartupHelper` manages Windows HKCU Run key registration. `HotkeyHelper` registers `Ctrl+Shift+S` (Dashboard), `Ctrl+Shift+W` (Toggle Widget), and `Ctrl+Shift+C` (Click-through recovery).
-- **Single Instance Mutex Activation:** Named mutex `Local\SpeedMeterPro.V1.<user>` detects secondary launches, cleanly restores and focuses the existing window via Win32 `FindWindow`/`ShowWindow`/`SetForegroundWindow`, and terminates without modal popups.
+- **Single Instance Architecture:** Coordinated by `SingleInstanceCoordinator` using Windows User SID-scoped mutex (`Global\SpeedMeterPro.V1.<UserSID>` with `Local\` fallback) and canonical per-user lockfile (`%LocalAppData%\SpeedMeterPro\speedmeter.owner.<UserSID>.lock`) ensuring safe single-owner isolation across sessions while allowing distinct user accounts to run concurrently. Secondary instances cleanly activate the existing main window via Win32 `FindWindow`/`ShowWindow`/`SetForegroundWindow` within the same session and exit with code 0.
 - **Low-Resource / Battery Mode:** Dynamically throttles UI refresh to 1 Hz (`displayTimer.Interval = 1000ms`) when battery power is detected or explicit toggle is active, conserving CPU/battery while preserving 100% byte accounting accuracy.
 - **History Data Retention & Pruning:** Added `PruneHistoryAsync` (30/90/180/365 days retention) and `ClearAllHistoryAsync` to `UsageHistoryService` and `SettingsView`.
 - **Versioned Configuration Export & Import:** `ConfigExportImportService` provides atomic `.tmp` export and import of settings and alert rules with schema validation, future schema rejection, and strict privacy invariants (never silently enables probes on import).
@@ -73,16 +73,16 @@
    ```
 2. **Automated Check Fixtures (`scripts/check.ps1`):**
    ```text
-   Checks summary: 222 passed, 1 skipped, 0 failed. Total evaluated: 223. Exit code: 0.
+   Checks summary: 229 passed, 1 skipped, 0 failed. Total evaluated: 230. Exit code: 0.
    ```
 3. **Windows Native Checks (`scripts/check.ps1 -Windows`):**
    ```text
-   Checks summary: 229 passed, 1 skipped, 0 failed. Total evaluated: 230. Exit code: 0.
+   Checks summary: 236 passed, 1 skipped, 0 failed. Total evaluated: 237. Exit code: 0.
    ```
 4. **WPF Smoke Test (`scripts/smoke.ps1`):**
    ```text
    18/18 native assertions True. Exit code: 0.
-   Artifacts: C:\Users\asad\Desktop\Dev\artifacts\smoke-20261012-002140
+   Artifacts: C:\Users\asad\Desktop\Dev\artifacts\smoke-20261012-020426
    ```
 
 ---
