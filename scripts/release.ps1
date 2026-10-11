@@ -188,8 +188,8 @@ if ($SkipTests -or $SkipSmoke -or $AllowDirty) {
 
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Green
-Write-Host "  GATE E1 INDEPENDENTLY VERIFIED — CONSUMER EXPERIENCE CLOSURE AUTHORIZED" -ForegroundColor Green
-Write-Host "  GATE E2: V1.0 PUBLIC RELEASE NOT VERIFIED — GA BLOCKED" -ForegroundColor Yellow
+Write-Host ("  GATE E1 INDEPENDENTLY VERIFIED " + [char]0x2014 + " CONSUMER EXPERIENCE CLOSURE AUTHORIZED") -ForegroundColor Green
+Write-Host "  GATE E2: V1.0 PUBLIC RELEASE NOT VERIFIED -- GA BLOCKED" -ForegroundColor Yellow
 Write-Host "           (Awaiting physical multi-monitor, live Windows 11 matrix," -ForegroundColor Yellow
 Write-Host "            24-hour mixed workload, and 7-day soak evidence)" -ForegroundColor Yellow
 Write-Host "================================================================" -ForegroundColor Green

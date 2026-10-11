@@ -13,7 +13,7 @@
 
 ```text
 ================================================================================
-GATE E1 INDEPENDENTLY VERIFIED — RC FIELD VALIDATION AUTHORIZED (TEST-SIGNED RC LAB MODE)
+GATE E1 INDEPENDENTLY VERIFIED — CONSUMER EXPERIENCE CLOSURE AUTHORIZED
 GATE E2: V1.0 PUBLIC RELEASE NOT VERIFIED — GA BLOCKED
          (Awaiting physical multi-monitor, live Windows 11 matrix,
           24-hour mixed workload, and 7-day soak evidence)
@@ -30,11 +30,11 @@ All authoritative artifacts are generated in `artifacts/release/` and verified w
 
 | Artifact | Role | Format | Size | SHA-256 Checksum |
 |---|---|---|---|---|
-| **`SpeedMeterPro-1.0.0-rc.1-Setup.exe`** | **Primary Canonical Installer** | Standalone Single-File Executable | ~49.62 MB (52,033,785 bytes) | `2a0bc49da6c654497b94b5e2fe50c6a66c237ac4e5b10ae0b1f50a700085a3f0` |
-| **`SpeedMeterPro-1.0.0-rc.1-win-x64.zip`** | Secondary Portable Archive | Self-Contained ZIP (275 files) | ~35.33 MB (37,050,570 bytes) | `1eea9a098e5f72a9958189d86ac14b9705e349141bcf0680f86411295d314bc5` |
-| **`SpeedMeterPro-1.0.0-rc.1-win-x64-fdd.zip`** | Secondary Enterprise Archive | Framework-Dependent ZIP (9 files) | ~0.44 MB (464,161 bytes) | `01053a9fded144c65d92fa7bded5ef0956e3b95b65022fdb51bfe74a9250d6cd` |
-| **`SpeedMeterPro-1.0.0-rc.1-sbom.spdx.json`** | Software Bill of Materials | SPDX 2.3 JSON Document | ~8.7 KB | `eac6299d2fb2c9c75f3a0937c44e99c15d4834789547dcf3a8904733cefece28` |
-| **`SpeedMeterPro-1.0.0-rc.1-THIRD-PARTY-NOTICES.txt`** | Third-Party License Notices | UTF-8 Text Notice File | ~4.2 KB | `46270b2849e7b233a76e93895ec0503f56cf8ff162d00742f1f00889241ec7bb` |
+| **`SpeedMeterPro-1.0.0-rc.1-Setup.exe`** | **Primary Canonical Installer** | Standalone Single-File Executable | ~142.10 MB (149,004,864 bytes) | `474c928bf483e336afe3a22b1dc91ee73542d34407c8bd03930f5289d0dbe903` |
+| **`SpeedMeterPro-1.0.0-rc.1-win-x64.zip`** | Secondary Diagnostic Archive | Self-Contained ZIP (489 files) | ~71.81 MB (75,300,502 bytes) | `c402f15c42450f1ab6f7b8aa6ff095bf2cc9dde0b3fd868efba2d36682bb8b81` |
+| **`SpeedMeterPro-1.0.0-rc.1-win-x64-fdd.zip`** | Secondary Enterprise Archive | Framework-Dependent ZIP (21 files) | ~1.61 MB (1,686,245 bytes) | `7d9ac54de072df925a765d04555d517cc10472adebe07a70beaae6072934f3ea` |
+| **`SpeedMeterPro-1.0.0-rc.1-sbom.spdx.json`** | Software Bill of Materials | SPDX 2.3 JSON Document | ~8.56 KB (8,766 bytes) | `8be15f39f5b7be892e884819a2a821bc2310b2ca52b1a67b56c8db601adbf25d` |
+| **`SpeedMeterPro-1.0.0-rc.1-THIRD-PARTY-NOTICES.txt`** | Third-Party License Notices | UTF-8 Text Notice File | ~4.06 KB (4,154 bytes) | `450a68c05828a069cb577e19ed224219c3e971d5d541426b906ac13c34c59bc3` |
 
 ### Package Inclusions & Architecture
 1. **Primary Installer (`SpeedMeterPro-1.0.0-rc.1-Setup.exe`):**
@@ -59,9 +59,9 @@ Empirical evaluation conducted on Windows x64 using pinned .NET 10 SDK:
 
 | Evaluation Dimension | Framework-Dependent (`win-x64`) | Self-Contained (`win-x64`) | Authoritative Release Decision |
 |---|---|---|---|
-| **Published File Count** | 9 files | 275 files | Self-Contained embedded in standalone Setup.exe for zero friction |
-| **Uncompressed Footprint** | ~1.13 MB | ~106.84 MB | Fits comfortably within modern Windows desktop profiles |
-| **Compressed Package Size** | ~0.44 MB | ~35.33 MB (ZIP) / ~49.62 MB (Setup.exe) | Rapid download across all standard connections |
+| **Published File Count** | 21 files | 489 files | Self-Contained embedded in standalone Setup.exe for zero friction |
+| **Uncompressed Footprint** | ~3.24 MB | ~174.20 MB | Fits comfortably within modern Windows desktop profiles |
+| **Compressed Package Size** | ~1.61 MB | ~71.81 MB (ZIP) / ~142.10 MB (Setup.exe) | Rapid download across all standard connections |
 | **Fresh Machine Execution** | **Failed without .NET 10 Desktop Runtime** | **Immediate Execution (Exit Code 0)** | Standard user does not need administrator rights or runtime downloads |
 | **WPF Smoke Test Result** | 18/18 True (when runtime present) | 18/18 True (standalone out of the box) | Verified identical functional parity |
 | **Cold Startup Latency** | ~1.4s | ~1.6s | +0.2s startup difference is negligible |
@@ -72,15 +72,15 @@ Empirical evaluation conducted on Windows x64 using pinned .NET 10 SDK:
 ## 4. Automated Verification Suite Results
 
 ### 4.1 Standard Checks (`scripts/check.ps1`)
-- **Total Evaluated:** 250
-- **Passed:** 249
+- **Total Evaluated:** 251
+- **Passed:** 250
 - **Skipped:** 1 (Intentional long-running fixture)
 - **Failed:** 0
 - **Exit Code:** 0
 
 ### 4.2 Windows Parity & Hardware Tests (`scripts/check.ps1 -Windows`)
-- **Total Evaluated:** 258
-- **Passed:** 257
+- **Total Evaluated:** 259
+- **Passed:** 258
 - **Skipped:** 1
 - **Failed:** 0
 - **Exit Code:** 0
