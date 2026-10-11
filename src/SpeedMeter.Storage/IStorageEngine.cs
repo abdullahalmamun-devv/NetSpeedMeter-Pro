@@ -29,7 +29,7 @@ public interface IStorageEngine : IAsyncDisposable, IDisposable
     Task<IReadOnlyList<UsageIntervalRecord>> GetPagedIntervalsAsync(HistoricalRange range, long? cursorStartUtcMs = null, string? cursorIntervalId = null, int pageSize = 50, CancellationToken ct = default);
     Task<int> ComputeDailyRollupsAsync(HistoricalRange range, string reportingTimezoneId, CancellationToken ct = default);
     Task RecordQuotaThresholdEventAsync(QuotaThresholdEvent record, CancellationToken ct = default);
-    Task<IReadOnlyList<double>> GetRecordedThresholdsAsync(string ruleId, int ruleRevision, string cycleIdentifier, CancellationToken ct = default);
+    Task<IReadOnlyList<int>> GetRecordedThresholdsAsync(string ruleId, int ruleRevision, string cycleIdentifier, CancellationToken ct = default);
 
     Task FlushAsync(TimeSpan timeout, CancellationToken ct = default);
 }

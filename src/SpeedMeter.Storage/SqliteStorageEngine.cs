@@ -465,7 +465,7 @@ public sealed class SqliteStorageEngine : IStorageEngine
         cmd.Transaction = tx;
         cmd.CommandText = @"
             INSERT OR IGNORE INTO quota_threshold_events(
-                event_id, rule_id, rule_revision, cycle_identifier, threshold_percent, crossed_at_utc_ms, effective_usage_bytes)
+                event_id, rule_id, rule_revision, cycle_identifier, threshold_bps, crossed_at_utc_ms, effective_usage_bytes)
             VALUES (
                 @id, @ruleId, @rev, @cycle, @th, @crossedAt, @usage);
         ";
@@ -473,7 +473,7 @@ public sealed class SqliteStorageEngine : IStorageEngine
         cmd.Parameters.AddWithValue("@ruleId", r.RuleId);
         cmd.Parameters.AddWithValue("@rev", r.RuleRevision);
         cmd.Parameters.AddWithValue("@cycle", r.CycleIdentifier);
-        cmd.Parameters.AddWithValue("@th", r.ThresholdPercent);
+        cmd.Parameters.AddWithValue("@th", r.ThresholdBps);
         cmd.Parameters.AddWithValue("@crossedAt", r.CrossedAtUtcMs);
         cmd.Parameters.AddWithValue("@usage", r.EffectiveUsageBytes);
         cmd.ExecuteNonQuery();
@@ -542,12 +542,12 @@ public sealed class SqliteStorageEngine : IStorageEngine
         }
         if (startUtcMs.HasValue)
         {
-            sql += " AND end_utc_ms >= @start";
+            sql += " AND end_utc_ms > @start";
             cmd.Parameters.AddWithValue("@start", startUtcMs.Value);
         }
         if (endUtcMs.HasValue)
         {
-            sql += " AND start_utc_ms <= @end";
+            sql += " AND start_utc_ms < @end";
             cmd.Parameters.AddWithValue("@end", endUtcMs.Value);
         }
         sql += " ORDER BY start_utc_ms ASC;";
@@ -580,7 +580,14 @@ public sealed class SqliteStorageEngine : IStorageEngine
     public async Task<(long TotalRx, long TotalTx)> GetTotalBytesAsync(
         string? scopeRevisionId = null, long? startUtcMs = null, long? endUtcMs = null, CancellationToken ct = default)
     {
-        // Enforces PRD §22 & Prompt §20: Checked application-side summation rather than potentially overflowing SQL SUM()
+        // Enforces PRD §11 & §22: Range-aware byte accumulation using canonical IntegerSplitter
+        if (startUtcMs.HasValue && endUtcMs.HasValue && endUtcMs.Value > startUtcMs.Value)
+        {
+            var range = new HistoricalRange(startUtcMs.Value, endUtcMs.Value);
+            var summary = await GetUsageSummaryAsync(range, "UTC", scopeRevisionId, ct: ct).ConfigureAwait(false);
+            return (summary.BytesRx, summary.BytesTx);
+        }
+
         var intervals = await GetIntervalsAsync(scopeRevisionId, startUtcMs, endUtcMs, ct).ConfigureAwait(false);
         long rx = 0;
         long tx = 0;
@@ -655,6 +662,8 @@ public sealed class SqliteStorageEngine : IStorageEngine
         long observedDurationMs = 0;
         long missingDurationMs = 0;
         var intervalCount = 0;
+        long lastEndMs = long.MinValue;
+        var hasTemporalOverlap = false;
 
         using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -665,6 +674,13 @@ public sealed class SqliteStorageEngine : IStorageEngine
             var rawRx = reader.GetInt64(3);
             var rawTx = reader.GetInt64(4);
             var isGap = reader.GetInt32(5) == 1;
+
+            // Invariant: Temporal overlap between intervals in the same scope stream indicates corruption
+            if (startMs < lastEndMs)
+            {
+                hasTemporalOverlap = true;
+            }
+            lastEndMs = Math.Max(lastEndMs, endMs);
 
             if (isGap)
             {
@@ -686,7 +702,7 @@ public sealed class SqliteStorageEngine : IStorageEngine
         var (earliestMs, latestMs) = await GetHistoryAvailabilityAsync(ct).ConfigureAwait(false);
         CompletenessState completeness;
 
-        if (health != StorageHealth.Healthy)
+        if (health != StorageHealth.Healthy || hasTemporalOverlap)
         {
             completeness = CompletenessState.StorageDegraded;
         }
@@ -711,7 +727,20 @@ public sealed class SqliteStorageEngine : IStorageEngine
             completeness = CompletenessState.Partial;
         }
 
-        var observableTotal = Math.Max(1L, observedDurationMs + missingDurationMs);
+        // PRD §11 & §22 & Prompt §14/15: Truthful coverage denominator
+        // Denominator must account for unexplained holes in monitoring rather than assuming 100%
+        long expectedMonitoredMs = range.DurationMs;
+        if (earliestMs.HasValue && latestMs.HasValue)
+        {
+            var effStart = Math.Max(range.StartUtcMs, earliestMs.Value);
+            var effEnd = Math.Min(range.EndUtcMs, latestMs.Value);
+            if (effEnd > effStart)
+            {
+                expectedMonitoredMs = effEnd - effStart;
+            }
+        }
+        var observableTotal = Math.Max(expectedMonitoredMs, observedDurationMs + missingDurationMs);
+        observableTotal = Math.Max(1L, observableTotal);
         var coverage = Math.Clamp((double)observedDurationMs / observableTotal, 0.0, 1.0);
 
         return new HistoricalSummary(
@@ -797,41 +826,75 @@ public sealed class SqliteStorageEngine : IStorageEngine
         for (var date = localStart; date <= localEnd; date = date.AddDays(1))
         {
             ct.ThrowIfCancellationRequested();
-            var dayStartUtc = new DateTimeOffset(date, tz.GetUtcOffset(date)).ToUniversalTime().ToUnixTimeMilliseconds();
-            var nextDate = date.AddDays(1);
-            var dayEndUtc = new DateTimeOffset(nextDate, tz.GetUtcOffset(nextDate)).ToUniversalTime().ToUnixTimeMilliseconds();
+            // Authoritative day range resolution using CalendarRangeResolver
+            var dayRange = CalendarRangeResolver.GetDayRange(date, tz);
 
-            if (dayEndUtc <= range.StartUtcMs || dayStartUtc >= range.EndUtcMs) continue;
+            if (dayRange.EndUtcMs <= range.StartUtcMs || dayRange.StartUtcMs >= range.EndUtcMs) continue;
 
-            var dayRange = new HistoricalRange(dayStartUtc, dayEndUtc);
-            var summary = await GetUsageSummaryAsync(dayRange, reportingTimezoneId, ct: ct).ConfigureAwait(false);
-
-            if (summary.TotalBytes > 0 || summary.ObservedDurationMs > 0 || summary.MissingDurationMs > 0)
+            // Query distinct scope and network dimensions for this day to preserve exact provenance
+            var dimensions = new List<(string ScopeId, string NetworkProfileId)>();
+            using (var connDims = CreateConnection())
             {
-                using var conn = CreateConnection();
-                await conn.OpenAsync(ct).ConfigureAwait(false);
-                ConfigurePragmas(conn);
-
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText = @"
-                    INSERT OR REPLACE INTO daily_rollups (
-                        start_utc_ms, end_utc_ms, reporting_timezone, calendar_rule_revision, scope_id, network_profile_id,
-                        bytes_rx, bytes_tx, valid_duration_ms, gap_duration_ms, peak_rx_interval_id, peak_tx_interval_id
-                    ) VALUES (
-                        @start, @end, @tz, '1', 'canonical_all', 'unidentified',
-                        @rx, @tx, @validDur, @gapDur, NULL, NULL
-                    );
+                await connDims.OpenAsync(ct).ConfigureAwait(false);
+                ConfigurePragmas(connDims);
+                using var cmdDims = connDims.CreateCommand();
+                cmdDims.CommandText = @"
+                    SELECT DISTINCT scope_revision_id, network_profile_id
+                    FROM usage_intervals
+                    WHERE end_utc_ms > @dayStart AND start_utc_ms < @dayEnd;
                 ";
-                cmd.Parameters.AddWithValue("@start", dayRange.StartUtcMs);
-                cmd.Parameters.AddWithValue("@end", dayRange.EndUtcMs);
-                cmd.Parameters.AddWithValue("@tz", reportingTimezoneId);
-                cmd.Parameters.AddWithValue("@rx", summary.BytesRx);
-                cmd.Parameters.AddWithValue("@tx", summary.BytesTx);
-                cmd.Parameters.AddWithValue("@validDur", summary.ObservedDurationMs);
-                cmd.Parameters.AddWithValue("@gapDur", summary.MissingDurationMs);
+                cmdDims.Parameters.AddWithValue("@dayStart", dayRange.StartUtcMs);
+                cmdDims.Parameters.AddWithValue("@dayEnd", dayRange.EndUtcMs);
+                using var readerDims = await cmdDims.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await readerDims.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    dimensions.Add((readerDims.GetString(0), readerDims.GetString(1)));
+                }
+            }
 
-                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                count++;
+            if (dimensions.Count == 0)
+            {
+                dimensions.Add(("canonical_all", "unidentified"));
+            }
+
+            foreach (var (scopeId, netId) in dimensions)
+            {
+                var summary = await GetUsageSummaryAsync(
+                    dayRange,
+                    reportingTimezoneId,
+                    scopeRevisionId: scopeId == "canonical_all" ? null : scopeId,
+                    networkProfileId: netId == "unidentified" ? null : netId,
+                    ct: ct).ConfigureAwait(false);
+
+                if (summary.TotalBytes > 0 || summary.ObservedDurationMs > 0 || summary.MissingDurationMs > 0)
+                {
+                    using var conn = CreateConnection();
+                    await conn.OpenAsync(ct).ConfigureAwait(false);
+                    ConfigurePragmas(conn);
+
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = @"
+                        INSERT OR REPLACE INTO daily_rollups (
+                            start_utc_ms, end_utc_ms, reporting_timezone, calendar_rule_revision, scope_id, network_profile_id,
+                            bytes_rx, bytes_tx, valid_duration_ms, gap_duration_ms, peak_rx_interval_id, peak_tx_interval_id
+                        ) VALUES (
+                            @start, @end, @tz, '1', @scope, @net,
+                            @rx, @tx, @validDur, @gapDur, NULL, NULL
+                        );
+                    ";
+                    cmd.Parameters.AddWithValue("@start", dayRange.StartUtcMs);
+                    cmd.Parameters.AddWithValue("@end", dayRange.EndUtcMs);
+                    cmd.Parameters.AddWithValue("@tz", reportingTimezoneId);
+                    cmd.Parameters.AddWithValue("@scope", scopeId);
+                    cmd.Parameters.AddWithValue("@net", netId);
+                    cmd.Parameters.AddWithValue("@rx", summary.BytesRx);
+                    cmd.Parameters.AddWithValue("@tx", summary.BytesTx);
+                    cmd.Parameters.AddWithValue("@validDur", summary.ObservedDurationMs);
+                    cmd.Parameters.AddWithValue("@gapDur", summary.MissingDurationMs);
+
+                    await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                    count++;
+                }
             }
         }
         return count;
@@ -843,7 +906,7 @@ public sealed class SqliteStorageEngine : IStorageEngine
         await EnqueueCommandAsync(new QuotaEventCmd(record), ct).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<double>> GetRecordedThresholdsAsync(
+    public async Task<IReadOnlyList<int>> GetRecordedThresholdsAsync(
         string ruleId, int ruleRevision, string cycleIdentifier, CancellationToken ct = default)
     {
         using var conn = CreateConnection();
@@ -852,19 +915,19 @@ public sealed class SqliteStorageEngine : IStorageEngine
 
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
-            SELECT threshold_percent FROM quota_threshold_events
+            SELECT threshold_bps FROM quota_threshold_events
             WHERE rule_id = @ruleId AND rule_revision = @rev AND cycle_identifier = @cycle
-            ORDER BY threshold_percent ASC;
+            ORDER BY threshold_bps ASC;
         ";
         cmd.Parameters.AddWithValue("@ruleId", ruleId);
         cmd.Parameters.AddWithValue("@rev", ruleRevision);
         cmd.Parameters.AddWithValue("@cycle", cycleIdentifier);
 
-        var list = new List<double>();
+        var list = new List<int>();
         using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            list.Add(reader.GetDouble(0));
+            list.Add(reader.GetInt32(0));
         }
         return list;
     }

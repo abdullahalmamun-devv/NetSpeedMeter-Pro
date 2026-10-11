@@ -51,12 +51,35 @@ public sealed class LiveGraphBuffer
 
     /// <summary>
     /// Appends a new point to the circular ring buffer.
-    /// Overwrites the oldest item when full, keeping memory allocation strictly zero.
+    /// Overwrites the oldest item when full, keeping memory allocation strictly zero during continuous sampling.
+    /// Rejects out-of-order timestamps and deterministically updates duplicate timestamps.
     /// </summary>
     public void Append(LiveGraphPoint point)
     {
         lock (gate)
         {
+            if (count > 0)
+            {
+                var lastIdx = (head - 1 + capacity) % capacity;
+                var lastPoint = buffer[lastIdx];
+
+                // Monotonic guard: Reject out-of-order points to protect chronology
+                if (point.TimestampUtcMs < lastPoint.TimestampUtcMs)
+                {
+                    return;
+                }
+
+                // Deterministic duplicate timestamp resolution: update in place if higher or equal sequence
+                if (point.TimestampUtcMs == lastPoint.TimestampUtcMs)
+                {
+                    if (point.Sequence >= lastPoint.Sequence)
+                    {
+                        buffer[lastIdx] = point;
+                    }
+                    return;
+                }
+            }
+
             buffer[head] = point;
             head = (head + 1) % capacity;
             if (count < capacity) count++;

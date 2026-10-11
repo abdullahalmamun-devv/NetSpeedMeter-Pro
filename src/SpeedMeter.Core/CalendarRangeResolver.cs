@@ -135,21 +135,55 @@ public static class CalendarRangeResolver
         return new HistoricalRange(startUtc.ToUnixTimeMilliseconds(), endUtc.ToUnixTimeMilliseconds());
     }
 
-    private static DateTimeOffset ToUtcOffset(DateTime unspecifiedLocal, TimeZoneInfo tz)
+    /// <summary>
+    /// Resolves the exact UTC [StartUtcMs, EndUtcMs) range for a specific local calendar date.
+    /// Uses authoritative timezone transition rules for invalid and ambiguous local boundaries.
+    /// </summary>
+    public static HistoricalRange GetDayRange(DateTime localDate, TimeZoneInfo timezone)
     {
+        ArgumentNullException.ThrowIfNull(timezone);
+        var startLocal = new DateTime(localDate.Year, localDate.Month, localDate.Day, 0, 0, 0, DateTimeKind.Unspecified);
+        var endLocal = startLocal.AddDays(1);
+
+        var startUtc = ToUtcOffset(startLocal, timezone);
+        var endUtc = ToUtcOffset(endLocal, timezone);
+
+        return new HistoricalRange(startUtc.ToUnixTimeMilliseconds(), endUtc.ToUnixTimeMilliseconds());
+    }
+
+    /// <summary>
+    /// Converts an unspecified local DateTime to UTC DateTimeOffset taking into account
+    /// dynamic daylight transition rules and ambiguous fall-back intervals.
+    /// </summary>
+    public static DateTimeOffset ToUtcOffset(DateTime unspecifiedLocal, TimeZoneInfo tz)
+    {
+        ArgumentNullException.ThrowIfNull(tz);
+
         if (tz.IsInvalidTime(unspecifiedLocal))
         {
             // During DST spring forward, the clock jumps forward over this time.
-            // Move forward by the DST adjustment gap to resolve to valid instant.
-            var adjustment = tz.GetAdjustmentRules();
+            // Dynamically derive the actual DST adjustment gap from TimeZoneInfo rules rather than assuming 1 hour.
             var gap = TimeSpan.FromHours(1);
-            return new DateTimeOffset(unspecifiedLocal + gap, tz.GetUtcOffset(unspecifiedLocal + gap)).ToUniversalTime();
+            var rules = tz.GetAdjustmentRules();
+            foreach (var r in rules)
+            {
+                if (unspecifiedLocal.Date >= r.DateStart && unspecifiedLocal.Date <= r.DateEnd)
+                {
+                    if (r.DaylightDelta > TimeSpan.Zero)
+                    {
+                        gap = r.DaylightDelta;
+                    }
+                    break;
+                }
+            }
+            var resolvedLocal = unspecifiedLocal + gap;
+            return new DateTimeOffset(resolvedLocal, tz.GetUtcOffset(resolvedLocal)).ToUniversalTime();
         }
 
         if (tz.IsAmbiguousTime(unspecifiedLocal))
         {
-            // During DST fall back, the clock repeats an hour.
-            // Prefer standard time offset to provide deterministic resolution.
+            // During DST fall back, the clock repeats an interval.
+            // Deterministically select the standard time offset (smaller offset) to resolve to calendar start.
             var offsets = tz.GetAmbiguousTimeOffsets(unspecifiedLocal);
             var standardOffset = offsets[0] < offsets[1] ? offsets[0] : offsets[1];
             return new DateTimeOffset(unspecifiedLocal, standardOffset).ToUniversalTime();

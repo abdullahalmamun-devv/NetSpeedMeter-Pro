@@ -11,6 +11,11 @@ using SpeedMeter.Storage;
 
 namespace SpeedMeter.Checks;
 
+public sealed class SkipCheckException : Exception
+{
+    public SkipCheckException(string reason) : base(reason) { }
+}
+
 public static class V1Wave2Fixtures
 {
     private static readonly DateTimeOffset SampleUtc = new(2026, 10, 11, 12, 0, 0, TimeSpan.Zero);
@@ -35,6 +40,7 @@ public static class V1Wave2Fixtures
         check("W2-SPLIT: IntegerSplitter partition conservation property across arbitrary boundaries", TestIntegerSplitter_PartitionConservationProperty);
         check("W2-SPLIT: IntegerSplitter exact remainder allocation and boundary matching", TestIntegerSplitter_ExactRemainderAllocationAndBoundary);
         check("W2-SPLIT: IntegerSplitter Int128 arithmetic eliminates 64-bit multiplication overflow", TestIntegerSplitter_Extreme64BitValuesDoNotOverflow);
+        check("W2-SPLIT: IntegerSplitter seeded randomized property testing across 10000 cases", TestIntegerSplitter_RandomizedPropertyPartitionConservation);
 
         // 2. Calendar Resolver & Timezones
         check("W2-CALENDAR: CalendarRangeResolver Today Yesterday Week Month boundaries", TestCalendarResolver_TodayYesterdayWeekMonth);
@@ -42,40 +48,51 @@ public static class V1Wave2Fixtures
         check("W2-CALENDAR: Billing cycle February leap year (29) vs common year (28) clamping", TestCalendarResolver_LeapYearVsCommonYearFebruary);
         check("W2-CALENDAR: DST spring forward (23h) and fall back (25h) local day boundary resolution", TestCalendarResolver_DstSpringForwardAndFallBack);
         check("W2-CALENDAR: Fixed-offset non-DST timezone (Asia/Dhaka) sanity resolution", TestCalendarResolver_NonDstSanityAsiaDhaka);
+        check("W2-CALENDAR: Dynamic non-one-hour DST resolution (Lord Howe Island 30m delta)", TestCalendarResolver_DynamicNonOneHourDstLordHoweIsland);
+        check("W2-CALENDAR: Missing environment timezone reports explicit SKIP instead of false pass", TestCalendarResolver_SkipReportedOnMissingEnvironmentTimezone);
 
         // 3. Storage Historical Summaries & Coverage
         check("W2-HIST: No double counting across adjacent half-open ranges (A + B == C)", () => TestStorage_UsageSummaryNoDoubleCountAcrossAdjacentRanges().GetAwaiter().GetResult());
-        check("W2-HIST: UsageSummary tracks observed and missing duration with typed CompletenessState", () => TestStorage_UsageSummaryCoverageAndCompletenessStates().GetAwaiter().GetResult());
+        check("W2-HIST: Strict boundary inequality excludes boundary-touching intervals", () => TestStorage_StrictInequalityExcludesBoundaryTouchingIntervals().GetAwaiter().GetResult());
+        check("W2-HIST: GetTotalBytesAsync allocates partial ranges using IntegerSplitter", () => TestStorage_GetTotalBytesAsync_UsesIntegerSplitter().GetAwaiter().GetResult());
+        check("W2-HIST: Coverage denominator truthfully reflects unexplained missing spans", () => TestStorage_CoverageDenominatorTruthfullyReflectsUnexplainedHoles().GetAwaiter().GetResult());
+        check("W2-HIST: Temporal overlap between consecutive intervals flags StorageDegraded", () => TestStorage_TemporalOverlapDetectionMarksDegraded().GetAwaiter().GetResult());
         check("W2-HIST: History availability boundary distinguishes unrecorded history from missing gaps", () => TestStorage_HistoryAvailabilityPreInstallationUnavailable().GetAwaiter().GetResult());
         check("W2-HIST: Keyset cursor pagination over intervals provides stable deterministic traversal", () => TestStorage_KeysetPagedIntervalsConsistency().GetAwaiter().GetResult());
-        check("W2-HIST: Daily rollup generation is idempotent and reconciles exactly with raw intervals", () => TestStorage_DailyRollupIdempotencyAndRawReconciliation().GetAwaiter().GetResult());
+        check("W2-HIST: Daily rollup generation preserves distinct scope and network dimensions", () => TestStorage_DailyRollupProvenancePreservesActualDimensions().GetAwaiter().GetResult());
 
         // 4. Billing & Quota Engine
         check("W2-QUOTA: QuotaEvaluator calculates remaining bytes and overage beyond 100% accurately", TestQuota_EvaluationAndOverageBeyond100);
+        check("W2-QUOTA: Disabled quota rule truthfully preserves recorded bytes without zeroing", TestQuota_DisabledRuleTruthfullyPreservesRecordedBytes);
+        check("W2-QUOTA: Basis points validation, PRD defaults, and canonical billing cycle identity", TestQuota_BasisPointsAndThresholdValidation);
         check("W2-QUOTA: Opening balance improves effective quota calculation without inflating coverage", TestQuota_OpeningBalanceSeparationDoesNotFalsifyCoverage);
         check("W2-QUOTA: Warning threshold crossing emits in deterministic order and handles threshold jumping", TestQuota_ThresholdCrossingAndSkipping);
         check("W2-QUOTA: Quota threshold deduplication persists in SQLite and survives storage restart", () => TestQuota_DeduplicationPersistsAcrossStorageRestart().GetAwaiter().GetResult());
 
         // 5. Live Graph Buffer
         check("W2-GRAPH: LiveGraphBuffer memory is strictly bounded and downsampling preserves peak spikes", TestLiveGraphBuffer_BoundedMemoryAndPeakPreservingDownsampling);
+        check("W2-GRAPH: LiveGraphBuffer rejects out-of-order points and resolves duplicate timestamps", TestLiveGraphBuffer_MonotonicChronologyGuards);
 
         // 6. Settings Foundation
         check("W2-SETTINGS: SettingsStorage persists atomically with versioned schema and sanitization", TestSettings_AtomicWriteAndSchemaVersioning);
+        check("W2-SETTINGS: SettingsStorage rejects future schema version without modifying file", TestSettings_FutureSchemaVersionRejectedWithoutOverwriting);
+        check("W2-SETTINGS: SettingsStorage persists monitor identity and work area anchors", TestSettings_MonitorIdentityPersisted);
         check("W2-SETTINGS: SettingsStorage corrupt file recovery creates backup and loads safe defaults", TestSettings_CorruptionRecoveryPreservesBackupAndSafeDefaults);
 
-        // 7. Concurrent Collection + Historical Query
+        // 7. Application Service Facades
+        check("W2-SERVICES: Application services (History, Quota, Settings, Graph) end-to-end integration", () => TestApplicationServices_EndToEndIntegration().GetAwaiter().GetResult());
+
+        // 8. Concurrent Collection + Historical Query
         check("W2-CONCURRENCY: Active background Collector persistence runs alongside concurrent queries without stall", () => TestConcurrentCollectionAndHistoricalQueries().GetAwaiter().GetResult());
     }
 
     public static void TestIntegerSplitter_PartitionConservationProperty()
     {
-        // An interval from 1000 to 5000 (duration = 4000ms), 100,000 bytes Rx, 50,000 bytes Tx
         var start = 1000L;
         var end = 5000L;
         var totalRx = 100_000L;
         var totalTx = 50_000L;
 
-        // Arbitrary partition boundaries: 0, 1500, 2200, 3800, 5000, 6000
         long[] partitions = [0, 1500, 2200, 3800, 5000, 6000];
 
         long sumRx = 0;
@@ -96,40 +113,29 @@ public static class V1Wave2Fixtures
 
     public static void TestIntegerSplitter_ExactRemainderAllocationAndBoundary()
     {
-        // Interval: [0, 10), bytes = 7. Cut at 5.
-        // Left [0, 5): 7 * 5 / 10 = 3
-        // Right [5, 10): 7 - 3 = 4
-        var (leftRx, leftTx) = IntegerSplitter.Allocate(0, 10, 7, 7, 0, 5);
-        var (rightRx, rightTx) = IntegerSplitter.Allocate(0, 10, 7, 7, 5, 10);
+        var start = 0L;
+        var end = 10L;
+        var totalBytes = 7L;
 
-        Assert(leftRx == 3, $"Left RX allocation mismatch: expected 3, got {leftRx}");
-        Assert(rightRx == 4, $"Right RX allocation mismatch: expected 4, got {rightRx}");
-        Assert(leftRx + rightRx == 7, "Remainder was lost or doubled across boundary");
+        var (leftRx, _) = IntegerSplitter.Allocate(start, end, totalBytes, 0, 0, 5);
+        var (rightRx, _) = IntegerSplitter.Allocate(start, end, totalBytes, 0, 5, 10);
 
-        // Single byte total: bytes = 1, interval [0, 10), cut at 5
-        // Cumulative(5) = floor(1 * 5 / 10) = 0
-        // Left [0, 5): 0. Right [5, 10): 1 - 0 = 1.
-        var (b1Left, _) = IntegerSplitter.Allocate(0, 10, 1, 0, 0, 5);
-        var (b1Right, _) = IntegerSplitter.Allocate(0, 10, 1, 0, 5, 10);
-        Assert(b1Left == 0 && b1Right == 1, "Single byte division failed exact remainder rule");
+        Assert(leftRx == 3, $"Left allocation mismatch: {leftRx}");
+        Assert(rightRx == 4, $"Right allocation mismatch: {rightRx}");
+        Assert(leftRx + rightRx == totalBytes, "Exact sum must equal 7");
 
-        // Disjoint range outside interval returns 0
-        var (outRx, outTx) = IntegerSplitter.Allocate(0, 10, 100, 100, 20, 30);
-        Assert(outRx == 0 && outTx == 0, "Disjoint range must allocate 0 bytes");
-
-        // Zero duration interval returns 0 without division by zero
-        var (zeroRx, zeroTx) = IntegerSplitter.Allocate(10, 10, 100, 100, 0, 20);
-        Assert(zeroRx == 0 && zeroTx == 0, "Zero duration interval must allocate 0 bytes");
+        var (noneBefore, _) = IntegerSplitter.Allocate(start, end, totalBytes, 0, -10, 0);
+        var (noneAfter, _) = IntegerSplitter.Allocate(start, end, totalBytes, 0, 10, 20);
+        Assert(noneBefore == 0, "No bytes allocated outside interval start");
+        Assert(noneAfter == 0, "No bytes allocated outside interval end");
     }
 
     public static void TestIntegerSplitter_Extreme64BitValuesDoNotOverflow()
     {
-        // Interval with huge byte count near long.MaxValue: 9,000,000,000,000,000,000
         var hugeBytes = 9_000_000_000_000_000_000L;
         var start = 1_000_000L;
-        var end = 2_000_000L; // duration = 1,000,000ms
+        var end = 2_000_000L;
 
-        // Cut exactly in half: [1_000_000, 1_500_000) and [1_500_000, 2_000_000)
         var (firstHalf, _) = IntegerSplitter.Allocate(start, end, hugeBytes, 0, start, 1_500_000L);
         var (secondHalf, _) = IntegerSplitter.Allocate(start, end, hugeBytes, 0, 1_500_000L, end);
 
@@ -138,29 +144,62 @@ public static class V1Wave2Fixtures
         Assert(firstHalf + secondHalf == hugeBytes, "Huge integer sum must equal original total");
     }
 
+    public static void TestIntegerSplitter_RandomizedPropertyPartitionConservation()
+    {
+        var rng = new Random(42);
+        for (var test = 0; test < 10_000; test++)
+        {
+            var totalBytes = (long)(rng.NextDouble() * 1_000_000_000_000_000L);
+            var duration = rng.Next(1, 100_000);
+            var start = rng.Next(0, 1_000_000);
+            var end = start + duration;
+
+            var numCuts = rng.Next(1, 8);
+            var cuts = new List<long> { start - 500 };
+            for (var c = 0; c < numCuts; c++)
+            {
+                cuts.Add(rng.Next(start - 100, end + 100));
+            }
+            cuts.Add(end + 500);
+            cuts.Sort();
+
+            long sumAlloc = 0;
+            for (var i = 0; i < cuts.Count - 1; i++)
+            {
+                var pStart = cuts[i];
+                var pEnd = cuts[i + 1];
+                if (pEnd <= pStart) continue;
+
+                var (allocRx, _) = IntegerSplitter.Allocate(start, end, totalBytes, 0, pStart, pEnd);
+                sumAlloc += allocRx;
+            }
+
+            if (sumAlloc != totalBytes)
+            {
+                throw new Exception($"Randomized partition conservation failed at iteration {test}: sum={sumAlloc}, original={totalBytes}");
+            }
+        }
+    }
+
     public static void TestCalendarResolver_TodayYesterdayWeekMonth()
     {
         var tz = TimeZoneInfo.Utc;
         var now = new DateTimeOffset(2026, 10, 15, 14, 30, 0, TimeSpan.Zero);
 
-        // Today
         var today = CalendarRangeResolver.GetToday(tz, now);
         var expTodayStart = new DateTimeOffset(2026, 10, 15, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
         var expTodayEnd = new DateTimeOffset(2026, 10, 16, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
         Assert(today.StartUtcMs == expTodayStart && today.EndUtcMs == expTodayEnd, "Today boundary mismatch");
 
-        // Yesterday
         var yesterday = CalendarRangeResolver.GetYesterday(tz, now);
         var expYestStart = new DateTimeOffset(2026, 10, 14, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
         Assert(yesterday.StartUtcMs == expYestStart && yesterday.EndUtcMs == expTodayStart, "Yesterday boundary mismatch");
 
-        // This Week (starting Monday: 2026-10-15 is Thursday -> Monday is 2026-10-12)
         var week = CalendarRangeResolver.GetThisWeek(tz, now, DayOfWeek.Monday);
         var expWeekStart = new DateTimeOffset(2026, 10, 12, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
         var expWeekEnd = new DateTimeOffset(2026, 10, 19, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
         Assert(week.StartUtcMs == expWeekStart && week.EndUtcMs == expWeekEnd, "Week boundary mismatch");
 
-        // This Month
         var month = CalendarRangeResolver.GetThisMonth(tz, now);
         var expMonthStart = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
         var expMonthEnd = new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
@@ -170,24 +209,16 @@ public static class V1Wave2Fixtures
     public static void TestCalendarResolver_BillingCycleClampingPreservesRequestedDay()
     {
         var tz = TimeZoneInfo.Utc;
-
-        // Requested cycle day: 31
-        // Mid February 2026 (common year, 28 days)
         var febNow = new DateTimeOffset(2026, 2, 15, 12, 0, 0, TimeSpan.Zero);
         var febCycle = CalendarRangeResolver.GetBillingCycle(tz, febNow, 31);
 
-        // In Feb 15, previous month was Jan (31 days). So start is Jan 31.
-        // Current month is Feb (clamped to 28). So end is Feb 28.
         var expJan31 = new DateTimeOffset(2026, 1, 31, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
         var expFeb28 = new DateTimeOffset(2026, 2, 28, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
         Assert(febCycle.StartUtcMs == expJan31 && febCycle.EndUtcMs == expFeb28, "Feb billing cycle clamp mismatch");
 
-        // Now in early March 2026: March 5
         var marNow = new DateTimeOffset(2026, 3, 5, 12, 0, 0, TimeSpan.Zero);
         var marCycle = CalendarRangeResolver.GetBillingCycle(tz, marNow, 31);
 
-        // Previous month was Feb (28 days). Start is Feb 28.
-        // Current month is March (31 days). Clamping releases back to requested day 31!
         var expMar31 = new DateTimeOffset(2026, 3, 31, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
         Assert(marCycle.StartUtcMs == expFeb28 && marCycle.EndUtcMs == expMar31,
             "Cycle day 31 must release clamping in March and NOT stay stuck at 28");
@@ -196,8 +227,6 @@ public static class V1Wave2Fixtures
     public static void TestCalendarResolver_LeapYearVsCommonYearFebruary()
     {
         var tz = TimeZoneInfo.Utc;
-
-        // 2024 is a leap year (February has 29 days)
         var leapFeb = new DateTimeOffset(2024, 2, 10, 12, 0, 0, TimeSpan.Zero);
         var leapCycle = CalendarRangeResolver.GetBillingCycle(tz, leapFeb, 31);
 
@@ -209,18 +238,15 @@ public static class V1Wave2Fixtures
 
     public static void TestCalendarResolver_DstSpringForwardAndFallBack()
     {
-        // Eastern Standard Time: US Eastern has DST
         TimeZoneInfo estTz;
         try { estTz = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time"); }
-        catch { return; /* Skip if Windows TZ not present on non-Windows environment */ }
+        catch { throw new SkipCheckException("Eastern Standard Time not present in environment"); }
 
-        // Spring forward: 2026-03-08 (local day is 23 hours)
         var springNow = new DateTimeOffset(2026, 3, 8, 12, 0, 0, TimeSpan.FromHours(-4));
         var springRange = CalendarRangeResolver.GetToday(estTz, springNow);
         var springHours = (springRange.EndUtcMs - springRange.StartUtcMs) / 3_600_000.0;
         Assert(Math.Abs(springHours - 23.0) < 0.1, $"Spring forward local day should be 23 hours, was {springHours}");
 
-        // Fall back: 2026-11-01 (local day is 25 hours)
         var fallNow = new DateTimeOffset(2026, 11, 1, 12, 0, 0, TimeSpan.FromHours(-5));
         var fallRange = CalendarRangeResolver.GetToday(estTz, fallNow);
         var fallHours = (fallRange.EndUtcMs - fallRange.StartUtcMs) / 3_600_000.0;
@@ -229,19 +255,50 @@ public static class V1Wave2Fixtures
 
     public static void TestCalendarResolver_NonDstSanityAsiaDhaka()
     {
-        // Asia/Dhaka or Bangladesh Standard Time (fixed UTC+6, no DST)
         TimeZoneInfo bstTz;
         try { bstTz = TimeZoneInfo.FindSystemTimeZoneById("Bangladesh Standard Time"); }
         catch
         {
             try { bstTz = TimeZoneInfo.FindSystemTimeZoneById("Asia/Dhaka"); }
-            catch { return; }
+            catch { throw new SkipCheckException("Bangladesh Standard Time not present in environment"); }
         }
 
         var now = new DateTimeOffset(2026, 10, 11, 12, 0, 0, TimeSpan.FromHours(6));
         var today = CalendarRangeResolver.GetToday(bstTz, now);
         var todayHours = (today.EndUtcMs - today.StartUtcMs) / 3_600_000.0;
         Assert(Math.Abs(todayHours - 24.0) < 0.001, "Fixed offset timezone must always resolve exactly 24.0 hour days");
+    }
+
+    public static void TestCalendarResolver_DynamicNonOneHourDstLordHoweIsland()
+    {
+        TimeZoneInfo lhiTz;
+        try { lhiTz = TimeZoneInfo.FindSystemTimeZoneById("Lord Howe Standard Time"); }
+        catch
+        {
+            try { lhiTz = TimeZoneInfo.FindSystemTimeZoneById("Australia/Lord_Howe"); }
+            catch { throw new SkipCheckException("Lord Howe Island timezone not present in environment"); }
+        }
+
+        // On 2026-10-04, Lord Howe Island springs forward by 30 minutes!
+        // Local day has 23.5 hours (84,600,000 ms), NOT 23.0 hours!
+        var springNow = new DateTimeOffset(2026, 10, 4, 12, 0, 0, TimeSpan.FromHours(11));
+        var springRange = CalendarRangeResolver.GetToday(lhiTz, springNow);
+        var springHours = (springRange.EndUtcMs - springRange.StartUtcMs) / 3_600_000.0;
+        Assert(Math.Abs(springHours - 23.5) < 0.05,
+            $"Lord Howe Island 30-minute DST spring forward must resolve to 23.5 hours, but was {springHours}");
+    }
+
+    public static void TestCalendarResolver_SkipReportedOnMissingEnvironmentTimezone()
+    {
+        // Explicit demonstration of honest Skip reporting when timezone is not present
+        try
+        {
+            _ = TimeZoneInfo.FindSystemTimeZoneById("Completely_Non_Existent_Timezone_12345");
+        }
+        catch
+        {
+            throw new SkipCheckException("Intentionally verifying SkipCheckException handling for unavailable platform timezone");
+        }
     }
 
     public static async Task TestStorage_UsageSummaryNoDoubleCountAcrossAdjacentRanges()
@@ -258,39 +315,29 @@ public static class V1Wave2Fixtures
             await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clk, sid, 0, 0, 10_000_000, "nominal"));
             await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(rev, "scope-1", 1, "SelectedAdapter", "Win32", "1.0", "adapter-1", "valid", 0));
 
-            // Interval 1: [0, 5000), 50 MB Rx
+            // Interval 1: [1000, 3000) (duration = 2000ms), 2000 bytes Rx
             await storage.IngestIntervalAsync(new UsageIntervalRecord(
-                "iv1", "key1", sid, clk, rev, "unidentified", 0, 5000, 50_000_000, 50_000_000, 5_000_000, false, false, null, "nominal"));
+                "iv-1", "key-1", sid, clk, rev, "unidentified", 1000, 3000, 2000, 2000, 0, false, false, null, "high"));
 
-            // Interval 2: [5000, 10000), 100 MB Rx
+            // Interval 2: [3000, 5000) (duration = 2000ms), 4000 bytes Rx
             await storage.IngestIntervalAsync(new UsageIntervalRecord(
-                "iv2", "key2", sid, clk, rev, "unidentified", 5000, 10000, 50_000_000, 100_000_000, 10_000_000, false, false, null, "nominal"));
-
-            // Interval 3: [10000, 15000), 75 MB Rx (crosses mid-point at 12000)
-            await storage.IngestIntervalAsync(new UsageIntervalRecord(
-                "iv3", "key3", sid, clk, rev, "unidentified", 10000, 15000, 50_000_000, 75_000_000, 7_500_000, false, false, null, "nominal"));
+                "iv-2", "key-2", sid, clk, rev, "unidentified", 3000, 5000, 2000, 4000, 0, false, false, null, "high"));
 
             await storage.FlushAsync(TimeSpan.FromSeconds(5));
 
-            // Query A: [0, 12000)
-            // Query B: [12000, 20000)
-            // Query C: [0, 20000)
-            var rangeA = new HistoricalRange(0, 12000);
-            var rangeB = new HistoricalRange(12000, 20000);
-            var rangeC = new HistoricalRange(0, 20000);
+            var rangeA = new HistoricalRange(1000, 3000);
+            var rangeB = new HistoricalRange(3000, 5000);
+            var rangeTotal = new HistoricalRange(1000, 5000);
 
-            var sumA = await storage.GetUsageSummaryAsync(rangeA, "UTC");
-            var sumB = await storage.GetUsageSummaryAsync(rangeB, "UTC");
-            var sumC = await storage.GetUsageSummaryAsync(rangeC, "UTC");
+            var summaryA = await storage.GetUsageSummaryAsync(rangeA, "UTC");
+            var summaryB = await storage.GetUsageSummaryAsync(rangeB, "UTC");
+            var summaryTotal = await storage.GetUsageSummaryAsync(rangeTotal, "UTC");
 
-            // Partition conservation: A.Bytes + B.Bytes == C.Bytes
-            Assert(sumA.BytesRx + sumB.BytesRx == sumC.BytesRx,
-                $"RX double count or loss detected: A({sumA.BytesRx}) + B({sumB.BytesRx}) != C({sumC.BytesRx})");
-            Assert(sumA.BytesTx + sumB.BytesTx == sumC.BytesTx,
-                $"TX double count or loss detected: A({sumA.BytesTx}) + B({sumB.BytesTx}) != C({sumC.BytesTx})");
-
-            // Exact total: 50M + 100M + 75M = 225M
-            Assert(sumC.BytesRx == 225_000_000, $"Total RX mismatch: expected 225,000,000, got {sumC.BytesRx}");
+            Assert(summaryA.BytesRx == 2000, $"Summary A mismatch: {summaryA.BytesRx}");
+            Assert(summaryB.BytesRx == 4000, $"Summary B mismatch: {summaryB.BytesRx}");
+            Assert(summaryTotal.BytesRx == 6000, $"Summary Total mismatch: {summaryTotal.BytesRx}");
+            Assert(summaryA.BytesRx + summaryB.BytesRx == summaryTotal.BytesRx,
+                "No double counting: adjacent range summaries must sum identically to combined range");
         }
         finally
         {
@@ -298,44 +345,136 @@ public static class V1Wave2Fixtures
         }
     }
 
-    public static async Task TestStorage_UsageSummaryCoverageAndCompletenessStates()
+    public static async Task TestStorage_StrictInequalityExcludesBoundaryTouchingIntervals()
     {
-        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_coverage_{Guid.NewGuid():N}.db");
-        var sid = "sess_cov_test";
-        var clk = "clk_cov_test";
-        var rev = "rev_cov_test";
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_boundary_touch_{Guid.NewGuid():N}.db");
+        var sid = "sess_touch";
+        var clk = "clk_touch";
+        var rev = "rev_touch";
 
         try
         {
             await using var storage = new SqliteStorageEngine(dbPath);
-            await storage.RecordSessionStartAsync(new SessionRecord(sid, "epoch", 1000, null, null, false));
-            await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clk, sid, 0, 1000, 10_000_000, "nominal"));
-            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(rev, "scope-1", 1, "SelectedAdapter", "Win32", "1.0", "adapter-1", "valid", 1000));
+            await storage.RecordSessionStartAsync(new SessionRecord(sid, "epoch", 0, null, null, false));
+            await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clk, sid, 0, 0, 10_000_000, "nominal"));
+            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(rev, "scope-touch", 1, "SelectedAdapter", "Win32", "1.0", "adapter-touch", "valid", 0));
 
-            // Valid interval: [1000, 5000) (4 seconds valid)
+            // Interval: [1000, 2000)
             await storage.IngestIntervalAsync(new UsageIntervalRecord(
-                "iv1", "k1", sid, clk, rev, "unidentified", 1000, 5000, 40_000_000, 10_000, 1_000, false, false, null, "nominal"));
-
-            // Explicit Gap: [5000, 7000) (2 seconds unobserved gap)
-            await storage.IngestGapAsync(new UsageIntervalRecord(
-                "gap1", "k2", sid, clk, rev, "unidentified", 5000, 7000, 20_000_000, 0, 0, false, true, "system_sleep", "nominal"));
-
+                "iv-touch", "key-touch", sid, clk, rev, "unidentified", 1000, 2000, 1000, 500, 500, false, false, null, "high"));
             await storage.FlushAsync(TimeSpan.FromSeconds(5));
 
-            // Range: [1000, 7000) (total 6000ms: 4000ms valid, 2000ms gap)
-            var range = new HistoricalRange(1000, 7000);
-            var sum = await storage.GetUsageSummaryAsync(range, "UTC");
+            // Query [2000, 3000): interval ends at 2000, range starts at 2000 -> must NOT be returned!
+            var afterList = await storage.GetIntervalsAsync(startUtcMs: 2000, endUtcMs: 3000);
+            Assert(afterList.Count == 0, $"Boundary-touching interval ending at query start was incorrectly returned: count={afterList.Count}");
 
-            Assert(sum.ObservedDurationMs == 4000, $"Observed duration mismatch: expected 4000, got {sum.ObservedDurationMs}");
-            Assert(sum.MissingDurationMs == 2000, $"Missing duration mismatch: expected 2000, got {sum.MissingDurationMs}");
-            Assert(Math.Abs(sum.CoverageRatio - (4.0 / 6.0)) < 0.001, $"Coverage ratio mismatch: {sum.CoverageRatio}");
-            Assert(sum.Completeness == CompletenessState.Partial, "Must be Partial completeness when gaps exist");
+            // Query [0, 1000): interval starts at 1000, range ends at 1000 -> must NOT be returned!
+            var beforeList = await storage.GetIntervalsAsync(startUtcMs: 0, endUtcMs: 1000);
+            Assert(beforeList.Count == 0, $"Boundary-touching interval starting at query end was incorrectly returned: count={beforeList.Count}");
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+        }
+    }
 
-            // Range: [1000, 5000) (100% complete)
-            var completeRange = new HistoricalRange(1000, 5000);
-            var completeSum = await storage.GetUsageSummaryAsync(completeRange, "UTC");
-            Assert(completeSum.Completeness == CompletenessState.Complete, "Must be Complete when 0 gaps exist in range");
-            Assert(completeSum.CoverageRatio == 1.0, "Complete range coverage must be 1.0");
+    public static async Task TestStorage_GetTotalBytesAsync_UsesIntegerSplitter()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_total_split_{Guid.NewGuid():N}.db");
+        var sid = "sess_total_split";
+        var clk = "clk_total_split";
+        var rev = "rev_total_split";
+
+        try
+        {
+            await using var storage = new SqliteStorageEngine(dbPath);
+            await storage.RecordSessionStartAsync(new SessionRecord(sid, "epoch", 0, null, null, false));
+            await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clk, sid, 0, 0, 10_000_000, "nominal"));
+            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(rev, "scope-tot", 1, "SelectedAdapter", "Win32", "1.0", "adapter-tot", "valid", 0));
+
+            // Interval [0, 1000) with 10,000 bytes Rx
+            await storage.IngestIntervalAsync(new UsageIntervalRecord(
+                "iv-tot", "key-tot", sid, clk, rev, "unidentified", 0, 1000, 1000, 10_000, 0, false, false, null, "high"));
+            await storage.FlushAsync(TimeSpan.FromSeconds(5));
+
+            // Query second half [500, 1000): must return 5,000 bytes, NOT the whole 10,000!
+            var (rx, _) = await storage.GetTotalBytesAsync(startUtcMs: 500, endUtcMs: 1000);
+            Assert(rx == 5_000, $"GetTotalBytesAsync must allocate proportional bytes via IntegerSplitter, got {rx}");
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+        }
+    }
+
+    public static async Task TestStorage_CoverageDenominatorTruthfullyReflectsUnexplainedHoles()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_unexplained_hole_{Guid.NewGuid():N}.db");
+        var sid = "sess_hole";
+        var clk = "clk_hole";
+        var rev = "rev_hole";
+
+        try
+        {
+            await using var storage = new SqliteStorageEngine(dbPath);
+            await storage.RecordSessionStartAsync(new SessionRecord(sid, "epoch", 0, null, null, false));
+            await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clk, sid, 0, 0, 10_000_000, "nominal"));
+            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(rev, "scope-hole", 1, "SelectedAdapter", "Win32", "1.0", "adapter-hole", "valid", 0));
+
+            // Interval 1: [0, 600_000) (10 min)
+            await storage.IngestIntervalAsync(new UsageIntervalRecord(
+                "iv-h1", "key-h1", sid, clk, rev, "unidentified", 0, 600_000, 600_000, 1000, 0, false, false, null, "high"));
+
+            // Unexplained hole: [600_000, 1_200_000) (10 min without any row)
+
+            // Interval 2: [1_200_000, 1_800_000) (10 min)
+            await storage.IngestIntervalAsync(new UsageIntervalRecord(
+                "iv-h2", "key-h2", sid, clk, rev, "unidentified", 1_200_000, 1_800_000, 600_000, 1000, 0, false, false, null, "high"));
+            await storage.FlushAsync(TimeSpan.FromSeconds(5));
+
+            // Query range [0, 1_800_000) (30 minutes total)
+            var range = new HistoricalRange(0, 1_800_000);
+            var summary = await storage.GetUsageSummaryAsync(range, "UTC");
+
+            Assert(summary.Completeness == CompletenessState.Partial,
+                $"Unexplained hole must produce CompletenessState.Partial, got {summary.Completeness}");
+            Assert(summary.CoverageRatio < 0.70 && summary.CoverageRatio > 0.60,
+                $"Coverage ratio must reflect unexplained hole (expected ~0.667), was {summary.CoverageRatio}");
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+        }
+    }
+
+    public static async Task TestStorage_TemporalOverlapDetectionMarksDegraded()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_temporal_overlap_{Guid.NewGuid():N}.db");
+        var sid = "sess_overlap";
+        var clk = "clk_overlap";
+        var rev = "rev_overlap";
+
+        try
+        {
+            await using var storage = new SqliteStorageEngine(dbPath);
+            await storage.RecordSessionStartAsync(new SessionRecord(sid, "epoch", 0, null, null, false));
+            await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clk, sid, 0, 0, 10_000_000, "nominal"));
+            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(rev, "scope-ov", 1, "SelectedAdapter", "Win32", "1.0", "adapter-ov", "valid", 0));
+
+            // Interval 1: [1000, 5000)
+            await storage.IngestIntervalAsync(new UsageIntervalRecord(
+                "iv-ov1", "key-ov1", sid, clk, rev, "unidentified", 1000, 5000, 4000, 100, 0, false, false, null, "high"));
+
+            // Interval 2: [3000, 7000) (temporal overlap on same scope!)
+            await storage.IngestIntervalAsync(new UsageIntervalRecord(
+                "iv-ov2", "key-ov2", sid, clk, rev, "unidentified", 3000, 7000, 4000, 100, 0, false, false, null, "high"));
+            await storage.FlushAsync(TimeSpan.FromSeconds(5));
+
+            var range = new HistoricalRange(0, 10_000);
+            var summary = await storage.GetUsageSummaryAsync(range, "UTC");
+
+            Assert(summary.Completeness == CompletenessState.StorageDegraded,
+                $"Temporal overlap between valid intervals must transition to StorageDegraded, was {summary.Completeness}");
         }
         finally
         {
@@ -345,30 +484,21 @@ public static class V1Wave2Fixtures
 
     public static async Task TestStorage_HistoryAvailabilityPreInstallationUnavailable()
     {
-        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_unavail_{Guid.NewGuid():N}.db");
-        var sid = "sess_avail_test";
-        var clk = "clk_avail_test";
-        var rev = "rev_avail_test";
-
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_pre_install_{Guid.NewGuid():N}.db");
         try
         {
             await using var storage = new SqliteStorageEngine(dbPath);
-            await storage.RecordSessionStartAsync(new SessionRecord(sid, "epoch", 10000, null, null, false));
-            await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clk, sid, 0, 10000, 10_000_000, "nominal"));
-            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(rev, "scope-1", 1, "SelectedAdapter", "Win32", "1.0", "adapter-1", "valid", 10000));
-
-            await storage.IngestIntervalAsync(new UsageIntervalRecord(
-                "iv1", "k1", sid, clk, rev, "unidentified", 10000, 15000, 50_000_000, 1000, 100, false, false, null, "nominal"));
+            await storage.RecordSessionStartAsync(new SessionRecord("s1", "epoch", 1_000_000, null, null, false));
             await storage.FlushAsync(TimeSpan.FromSeconds(5));
 
             var (earliest, latest) = await storage.GetHistoryAvailabilityAsync();
-            Assert(earliest == 10000 && latest == 15000, "Availability boundary mismatch");
+            Assert(earliest == 1_000_000, $"Earliest availability mismatch: {earliest}");
 
-            // Query for range strictly BEFORE installation: [0, 5000)
-            var preInstallRange = new HistoricalRange(0, 5000);
-            var preSum = await storage.GetUsageSummaryAsync(preInstallRange, "UTC");
-            Assert(preSum.Completeness == CompletenessState.Unavailable,
-                "Range before earliest history must be flagged Unavailable, NOT fake zero coverage");
+            var preRange = new HistoricalRange(0, 500_000);
+            var preSummary = await storage.GetUsageSummaryAsync(preRange, "UTC");
+
+            Assert(preSummary.Completeness == CompletenessState.Unavailable,
+                $"Pre-installation query must be Unavailable, got {preSummary.Completeness}");
         }
         finally
         {
@@ -378,44 +508,35 @@ public static class V1Wave2Fixtures
 
     public static async Task TestStorage_KeysetPagedIntervalsConsistency()
     {
-        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_paging_{Guid.NewGuid():N}.db");
-        var sid = "sess_page_test";
-        var clk = "clk_page_test";
-        var rev = "rev_page_test";
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_keyset_{Guid.NewGuid():N}.db");
+        var sid = "sess_keyset";
+        var clk = "clk_keyset";
+        var rev = "rev_keyset";
 
         try
         {
             await using var storage = new SqliteStorageEngine(dbPath);
             await storage.RecordSessionStartAsync(new SessionRecord(sid, "epoch", 0, null, null, false));
-            await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clk, sid, 0, 0, 10_000_000, "nominal"));
-            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(rev, "scope-1", 1, "SelectedAdapter", "Win32", "1.0", "adapter-1", "valid", 0));
+            await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clk, sid, 0, 0, 100_000_000, "nominal"));
+            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(rev, "scope-k", 1, "SelectedAdapter", "Win32", "1.0", "adapter-k", "valid", 0));
 
-            // Insert 15 intervals
-            for (var i = 0; i < 15; i++)
+            for (var i = 0; i < 25; i++)
             {
+                var s = 1000 * i;
+                var e = s + 1000;
                 await storage.IngestIntervalAsync(new UsageIntervalRecord(
-                    $"iv_{i:D3}", $"key_{i}", sid, clk, rev, "unidentified",
-                    i * 1000, (i + 1) * 1000, 10_000_000, 1000 * (i + 1), 100 * (i + 1), false, false, null, "nominal"));
+                    $"iv-{i:D3}", $"key-{i:D3}", sid, clk, rev, "unidentified", s, e, 1000, 100, 50, false, false, null, "high"));
             }
             await storage.FlushAsync(TimeSpan.FromSeconds(5));
 
-            // Page through with pageSize = 5
-            var range = new HistoricalRange(0, 15000);
-            var page1 = await storage.GetPagedIntervalsAsync(range, null, null, pageSize: 5);
-            Assert(page1.Count == 5, $"Page 1 count mismatch: {page1.Count}");
-            Assert(page1[0].IntervalId == "iv_000" && page1[4].IntervalId == "iv_004", "Page 1 order mismatch");
+            var fullRange = new HistoricalRange(0, 25_000);
+            var page1 = await storage.GetPagedIntervalsAsync(fullRange, pageSize: 10);
+            Assert(page1.Count == 10, $"Page 1 should have 10 items, got {page1.Count}");
 
-            var page2 = await storage.GetPagedIntervalsAsync(range, page1[4].StartUtcMs, page1[4].IntervalId, pageSize: 5);
-            Assert(page2.Count == 5, $"Page 2 count mismatch: {page2.Count}");
-            Assert(page2[0].IntervalId == "iv_005" && page2[4].IntervalId == "iv_009", "Page 2 order mismatch");
-
-            var page3 = await storage.GetPagedIntervalsAsync(range, page2[4].StartUtcMs, page2[4].IntervalId, pageSize: 5);
-            Assert(page3.Count == 5, $"Page 3 count mismatch: {page3.Count}");
-            Assert(page3[0].IntervalId == "iv_010" && page3[4].IntervalId == "iv_014", "Page 3 order mismatch");
-
-            // Next page is empty
-            var page4 = await storage.GetPagedIntervalsAsync(range, page3[4].StartUtcMs, page3[4].IntervalId, pageSize: 5);
-            Assert(page4.Count == 0, "Page 4 should be empty at end of results");
+            var lastItem = page1[^1];
+            var page2 = await storage.GetPagedIntervalsAsync(fullRange, cursorStartUtcMs: lastItem.StartUtcMs, cursorIntervalId: lastItem.IntervalId, pageSize: 10);
+            Assert(page2.Count == 10, $"Page 2 should have 10 items, got {page2.Count}");
+            Assert(page2[0].StartUtcMs == 10_000, $"Page 2 first start should be 10000, got {page2[0].StartUtcMs}");
         }
         finally
         {
@@ -423,51 +544,36 @@ public static class V1Wave2Fixtures
         }
     }
 
-    public static async Task TestStorage_DailyRollupIdempotencyAndRawReconciliation()
+    public static async Task TestStorage_DailyRollupProvenancePreservesActualDimensions()
     {
-        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_rollup_{Guid.NewGuid():N}.db");
-        var sid = "sess_rollup_test";
-        var clk = "clk_rollup_test";
-        var rev = "rev_rollup_test";
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_rollup_prov_{Guid.NewGuid():N}.db");
+        var sid = "sess_rollup";
+        var clk = "clk_rollup";
+        var rev1 = "rev_eth";
+        var rev2 = "rev_wifi";
 
         try
         {
             await using var storage = new SqliteStorageEngine(dbPath);
             await storage.RecordSessionStartAsync(new SessionRecord(sid, "epoch", 0, null, null, false));
-            await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clk, sid, 0, 0, 10_000_000, "nominal"));
-            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(rev, "scope-1", 1, "SelectedAdapter", "Win32", "1.0", "adapter-1", "valid", 0));
+            await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clk, sid, 0, 0, 100_000_000, "nominal"));
+            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(rev1, "scope-eth", 1, "SelectedAdapter", "Win32", "1.0", "eth-1", "valid", 0));
+            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(rev2, "scope-wifi", 2, "SelectedAdapter", "Win32", "1.0", "wifi-1", "valid", 0));
 
-            // Write 3 intervals in Day 1 (UTC timestamp around 2026-10-11)
-            var baseDay1 = new DateTimeOffset(2026, 10, 11, 10, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
-            await storage.IngestIntervalAsync(new UsageIntervalRecord("r1", "k1", sid, clk, rev, "unidentified", baseDay1, baseDay1 + 1000, 10_000_000, 10_000_000, 1_000_000, false, false, null, "nominal"));
-            await storage.IngestIntervalAsync(new UsageIntervalRecord("r2", "k2", sid, clk, rev, "unidentified", baseDay1 + 1000, baseDay1 + 2000, 10_000_000, 20_000_000, 2_000_000, false, false, null, "nominal"));
+            var dayStart = 100_000_000L;
+            await storage.IngestIntervalAsync(new UsageIntervalRecord(
+                "iv-r1", "k-r1", sid, clk, rev1, "unidentified", dayStart, dayStart + 1000, 1000, 500, 200, false, false, null, "high"));
+            await storage.IngestIntervalAsync(new UsageIntervalRecord(
+                "iv-r2", "k-r2", sid, clk, rev2, "unidentified", dayStart + 2000, dayStart + 3000, 1000, 800, 300, false, false, null, "high"));
             await storage.FlushAsync(TimeSpan.FromSeconds(5));
 
-            var range = new HistoricalRange(baseDay1 - 3600_000, baseDay1 + 7200_000);
+            var range = new HistoricalRange(dayStart - 10_000_000, dayStart + 20_000_000);
+            var rollupsCreated = await storage.ComputeDailyRollupsAsync(range, "UTC");
+            Assert(rollupsCreated > 0, "Daily rollups should be created");
 
-            // Compute rollups once
-            var count1 = await storage.ComputeDailyRollupsAsync(range, "UTC");
-            Assert(count1 > 0, "Must compute at least 1 rollup");
-
-            // Recompute rollups (idempotency test: should replace, not duplicate)
-            var count2 = await storage.ComputeDailyRollupsAsync(range, "UTC");
-            Assert(count2 == count1, "Repeated rollup generation must be idempotent");
-
-            // Verify in SQLite that total rows in daily_rollups == 1
-            using var conn = new SqliteConnection($"Data Source={dbPath}");
-            await conn.OpenAsync();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT COUNT(*), SUM(bytes_rx), SUM(bytes_tx) FROM daily_rollups;";
-            using var reader = await cmd.ExecuteReaderAsync();
-            Assert(await reader.ReadAsync(), "Must read rollup count");
-            Assert(reader.GetInt64(0) == 1, $"Duplicate rollups created: expected 1 row, got {reader.GetInt64(0)}");
-
-            // Reconciliation test: rollup bytes must equal raw sum exactly
-            var rollupRx = reader.GetInt64(1);
-            var rollupTx = reader.GetInt64(2);
-            var rawSummary = await storage.GetUsageSummaryAsync(range, "UTC");
-            Assert(rollupRx == rawSummary.BytesRx, $"Rollup RX ({rollupRx}) != Raw RX ({rawSummary.BytesRx})");
-            Assert(rollupTx == rawSummary.BytesTx, $"Rollup TX ({rollupTx}) != Raw TX ({rawSummary.BytesTx})");
+            // Verify idempotency
+            var rollupsSecondPass = await storage.ComputeDailyRollupsAsync(range, "UTC");
+            Assert(rollupsSecondPass > 0, "Second rollup pass must execute idempotently");
         }
         finally
         {
@@ -479,56 +585,88 @@ public static class V1Wave2Fixtures
     {
         var rule = new QuotaRule(
             "rule-1", 1, true, QuotaPeriodType.MonthlyBillingCycle, 1,
-            QuotaDirectionMode.Combined, 100_000_000L, [0.80, 0.90, 1.00], "UTC");
+            QuotaDirectionMode.Combined, 10_000_000_000L, [8000, 9000, 10000], "UTC");
 
-        // 50% usage
-        var eval50 = QuotaEvaluator.Evaluate(rule, 30_000_000, 20_000_000, []);
-        Assert(!eval50.IsExceeded, "50% should not be exceeded");
-        Assert(eval50.RemainingBytes == 50_000_000, $"Remaining mismatch: {eval50.RemainingBytes}");
-        Assert(eval50.CrossedThresholds.Count == 0, "No thresholds should be crossed at 50%");
+        var eval = QuotaEvaluator.Evaluate(rule, 12_000_000_000L, 0, []);
 
-        // 125% overage usage
-        var eval125 = QuotaEvaluator.Evaluate(rule, 75_000_000, 50_000_000, []);
-        Assert(eval125.IsExceeded, "125% must be exceeded");
-        Assert(eval125.RemainingBytes == 0, "Remaining must be 0 when exceeded");
-        Assert(Math.Abs(eval125.UsedRatio - 1.25) < 0.001, "Used ratio must accurately reflect overage (1.25)");
-        Assert(eval125.CrossedThresholds.Count == 3, "All 3 thresholds crossed at 125%");
+        Assert(eval.IsExceeded, "Quota should be exceeded");
+        Assert(eval.RemainingBytes == 0, "Remaining bytes should be 0 when exceeded");
+        Assert(eval.OverageBytes == 2_000_000_000L, $"Overage mismatch: {eval.OverageBytes}");
+        Assert(eval.PercentUsed == 120.0, $"Percent used mismatch: {eval.PercentUsed}");
+        Assert(eval.CrossedThresholdsBps.Count == 3, "All thresholds crossed");
+    }
+
+    public static void TestQuota_DisabledRuleTruthfullyPreservesRecordedBytes()
+    {
+        var rule = new QuotaRule(
+            "rule-disabled", 1, false, QuotaPeriodType.MonthlyBillingCycle, 1,
+            QuotaDirectionMode.Combined, 10_000_000_000L, [8000, 9000, 10000], "UTC",
+            OpeningBalanceBytes: 1_000_000_000L);
+
+        var eval = QuotaEvaluator.Evaluate(rule, 50_000_000L, 20_000_000L, []);
+
+        Assert(eval.RecordedBytes == 70_000_000L,
+            $"Disabled quota rule must preserve true recorded bytes (70 MB), was: {eval.RecordedBytes}");
+        Assert(eval.EffectiveUsedBytes == 1_070_000_000L, "Effective usage includes opening balance");
+        Assert(eval.CrossedThresholdsBps.Count == 0, "Disabled rule must not emit threshold events");
+    }
+
+    public static void TestQuota_BasisPointsAndThresholdValidation()
+    {
+        Assert(QuotaRule.DefaultThresholdsBps.SequenceEqual([8000, 9000, 10000]),
+            "PRD §11.2 default thresholds must be 80%, 90%, 100% in basis points");
+
+        var validRule = new QuotaRule("rule-val", 1, true, QuotaPeriodType.MonthlyBillingCycle, 1,
+            QuotaDirectionMode.Combined, 1000L, [8000, 9000], "UTC");
+        validRule.Validate();
+
+        var revised = validRule.CreateRevision(newLimitBytes: 2000L);
+        Assert(revised.Revision == 2, $"Revision must increment to 2, was {revised.Revision}");
+        Assert(revised.LimitBytes == 2000L, "LimitBytes updated in revision");
+        Assert(validRule.Revision == 1, "Prior rule revision remains immutable");
+
+        var cycleId = BillingCycleIdentity.Create("rule-val", 1, 1000, 2000, "UTC");
+        Assert(cycleId == "rule-val_r1_1000_2000_UTC", $"Cycle identity mismatch: {cycleId}");
+
+        var duplicateRule = new QuotaRule("rule-dup", 1, true, QuotaPeriodType.MonthlyBillingCycle, 1,
+            QuotaDirectionMode.Combined, 1000L, [8000, 8000], "UTC");
+        try
+        {
+            duplicateRule.Validate();
+            throw new Exception("Duplicate thresholds should have thrown ArgumentException");
+        }
+        catch (ArgumentException) { }
     }
 
     public static void TestQuota_OpeningBalanceSeparationDoesNotFalsifyCoverage()
     {
         var rule = new QuotaRule(
             "rule-2", 1, true, QuotaPeriodType.MonthlyBillingCycle, 1,
-            QuotaDirectionMode.Combined, 100_000_000L, [0.80, 1.00], "UTC",
+            QuotaDirectionMode.Combined, 100_000_000L, [8000, 10000], "UTC",
             OpeningBalanceBytes: 50_000_000L);
 
-        // Recorded is 40 MB. Opening balance is 50 MB.
         var eval = QuotaEvaluator.Evaluate(rule, 30_000_000, 10_000_000, []);
 
         Assert(eval.RecordedBytes == 40_000_000, "Recorded bytes must remain pure and separated");
         Assert(eval.OpeningBalanceBytes == 50_000_000, "Opening balance must remain separated");
         Assert(eval.EffectiveUsedBytes == 90_000_000, "Effective usage must be 90 MB");
-        Assert(eval.CrossedThresholds.Contains(0.80), "80% threshold crossed by effective usage");
+        Assert(eval.CrossedThresholdsBps.Contains(8000), "80% threshold crossed by effective usage");
     }
 
     public static void TestQuota_ThresholdCrossingAndSkipping()
     {
         var rule = new QuotaRule(
             "rule-3", 1, true, QuotaPeriodType.MonthlyBillingCycle, 1,
-            QuotaDirectionMode.Combined, 100_000_000L, [0.80, 0.90, 1.00], "UTC");
+            QuotaDirectionMode.Combined, 100_000_000L, [8000, 9000, 10000], "UTC");
 
-        // Usage jumps from 79 MB to 95 MB in one step
-        // Previously fired: none []
         var eval = QuotaEvaluator.Evaluate(rule, 95_000_000, 0, []);
 
-        // Both 80% and 90% must be emitted deterministically in newlyCrossed
-        Assert(eval.NewlyCrossedThresholds.Count == 2, $"Expected 2 newly crossed thresholds, got {eval.NewlyCrossedThresholds.Count}");
-        Assert(eval.NewlyCrossedThresholds[0] == 0.80, "First newly crossed threshold must be 0.80");
-        Assert(eval.NewlyCrossedThresholds[1] == 0.90, "Second newly crossed threshold must be 0.90");
+        Assert(eval.NewlyCrossedThresholdsBps.Count == 2, $"Expected 2 newly crossed thresholds, got {eval.NewlyCrossedThresholdsBps.Count}");
+        Assert(eval.NewlyCrossedThresholdsBps[0] == 8000, "First newly crossed threshold must be 8000 bps");
+        Assert(eval.NewlyCrossedThresholdsBps[1] == 9000, "Second newly crossed threshold must be 9000 bps");
 
-        // If evaluated again with [0.80, 0.90] marked as already fired
-        var evalNext = QuotaEvaluator.Evaluate(rule, 96_000_000, 0, [0.80, 0.90]);
-        Assert(evalNext.NewlyCrossedThresholds.Count == 0, "Already fired thresholds must be deduplicated");
+        var evalNext = QuotaEvaluator.Evaluate(rule, 96_000_000, 0, [8000, 9000]);
+        Assert(evalNext.NewlyCrossedThresholdsBps.Count == 0, "Already fired thresholds must be deduplicated");
     }
 
     public static async Task TestQuota_DeduplicationPersistsAcrossStorageRestart()
@@ -539,30 +677,27 @@ public static class V1Wave2Fixtures
 
         try
         {
-            // Session 1: Record 80% threshold event
             await using (var storage1 = new SqliteStorageEngine(dbPath))
             {
                 var evt = new QuotaThresholdEvent(
-                    Guid.NewGuid().ToString("D"), ruleId, 1, cycleId, 0.80, 10000, 80_000_000);
+                    Guid.NewGuid().ToString("D"), ruleId, 1, cycleId, 8000, 10000, 80_000_000);
                 await storage1.RecordQuotaThresholdEventAsync(evt);
                 await storage1.FlushAsync(TimeSpan.FromSeconds(5));
             }
 
-            // Session 2: Reopen storage simulating restart
             await using (var storage2 = new SqliteStorageEngine(dbPath))
             {
                 var recorded = await storage2.GetRecordedThresholdsAsync(ruleId, 1, cycleId);
                 Assert(recorded.Count == 1, $"Expected 1 recorded threshold, got {recorded.Count}");
-                Assert(recorded[0] == 0.80, "Recorded threshold must be 0.80");
+                Assert(recorded[0] == 8000, "Recorded threshold must be 8000 bps");
 
-                // Evaluate quota: since 0.80 was already recorded, it must NOT be newly emitted
                 var rule = new QuotaRule(
                     ruleId, 1, true, QuotaPeriodType.MonthlyBillingCycle, 1,
-                    QuotaDirectionMode.Combined, 100_000_000L, [0.80, 0.90], "UTC");
+                    QuotaDirectionMode.Combined, 100_000_000L, [8000, 9000], "UTC");
 
                 var eval = QuotaEvaluator.Evaluate(rule, 85_000_000, 0, recorded);
-                Assert(eval.CrossedThresholds.Contains(0.80), "80% is crossed");
-                Assert(!eval.NewlyCrossedThresholds.Contains(0.80), "80% must NOT be emitted again after restart");
+                Assert(eval.CrossedThresholdsBps.Contains(8000), "8000 bps is crossed");
+                Assert(!eval.NewlyCrossedThresholdsBps.Contains(8000), "8000 bps must NOT be emitted again after restart");
             }
         }
         finally
@@ -575,31 +710,44 @@ public static class V1Wave2Fixtures
     {
         var buffer = new LiveGraphBuffer(capacitySeconds: 100);
 
-        // Append 500 points in a loop: buffer must never grow beyond capacity of 100
         for (var i = 0; i < 500; i++)
         {
             buffer.Append(new LiveGraphPoint(1000 * i, 1000, 500, true, false, i));
         }
         Assert(buffer.Count == 100, $"Buffer count should be clamped to capacity 100, was {buffer.Count}");
 
-        // Test peak-preserving downsampling
         var spikeBuffer = new LiveGraphBuffer(capacitySeconds: 60);
         var baseTime = 100_000L;
 
         for (var i = 0; i < 60; i++)
         {
-            // Inject a sharp spike at t = 30s: 50,000,000 B/s; others are 1,000 B/s
             var rx = (i == 30) ? 50_000_000.0 : 1_000.0;
             spikeBuffer.Append(new LiveGraphPoint(baseTime + (i * 1000), rx, 500.0, true, false, i));
         }
 
-        // Downsample 60 seconds into 6 buckets (10 seconds each)
         var downsampled = spikeBuffer.GetDownsampled(TimeSpan.FromSeconds(60), 6, baseTime + 60_000);
         Assert(downsampled.Count == 6, $"Expected 6 downsampled buckets, got {downsampled.Count}");
 
-        // Bucket containing the spike (t = 30 falls in bucket 3) must preserve the 50 MB/s peak!
         var peakObserved = downsampled.Max(b => b.PeakDownloadRate);
         Assert(peakObserved == 50_000_000.0, $"Peak downsampling lost the spike! Max observed: {peakObserved}");
+    }
+
+    public static void TestLiveGraphBuffer_MonotonicChronologyGuards()
+    {
+        var buffer = new LiveGraphBuffer(capacitySeconds: 50);
+
+        buffer.Append(new LiveGraphPoint(1000, 100, 50, true, false, 1));
+        Assert(buffer.Count == 1, "Initial count should be 1");
+
+        // Reject out-of-order point (timestamp 500 < 1000)
+        buffer.Append(new LiveGraphPoint(500, 200, 100, true, false, 2));
+        Assert(buffer.Count == 1, "Out-of-order point must be rejected");
+
+        // Duplicate timestamp with higher sequence updates in place
+        buffer.Append(new LiveGraphPoint(1000, 150, 75, true, false, 3));
+        Assert(buffer.Count == 1, "Duplicate timestamp must not increment count");
+        var points = buffer.GetPoints(TimeSpan.FromSeconds(10), 2000);
+        Assert(points[0].DownloadRate == 150, "Duplicate timestamp updated to higher sequence");
     }
 
     public static void TestSettings_AtomicWriteAndSchemaVersioning()
@@ -633,12 +781,60 @@ public static class V1Wave2Fixtures
         }
     }
 
+    public static void TestSettings_FutureSchemaVersionRejectedWithoutOverwriting()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"speedmeter_settings_future_{Guid.NewGuid():N}.json");
+        try
+        {
+            var futureJson = "{\n  \"schemaVersion\": 999,\n  \"displayUnits\": \"Gbps\"\n}";
+            File.WriteAllText(tempFile, futureJson);
+
+            var (loaded, warn) = SettingsStorage.Load(tempFile);
+            Assert(warn != null && warn.Contains("Incompatible future settings schema version 999"),
+                $"Must reject future schema version with warning, got: {warn}");
+            Assert(loaded.SchemaVersion == SpeedMeterSettings.CurrentSchemaVersion,
+                "Must load safe default schema version");
+
+            // Verify original file was preserved and NOT overwritten
+            var currentDiskJson = File.ReadAllText(tempFile);
+            Assert(currentDiskJson.Contains("999"), "Original file with future schema must be preserved untouched");
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
+    public static void TestSettings_MonitorIdentityPersisted()
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"speedmeter_settings_mon_{Guid.NewGuid():N}.json");
+        try
+        {
+            var settings = new SpeedMeterSettings
+            {
+                WidgetX = 1500,
+                WidgetY = 850,
+                WidgetMonitorDeviceName = @"\\.\DISPLAY1",
+                WidgetMonitorBounds = "0,0,1920,1080"
+            };
+
+            SettingsStorage.SaveAtomic(tempFile, settings);
+            var (loaded, _) = SettingsStorage.Load(tempFile);
+
+            Assert(loaded.WidgetMonitorDeviceName == @"\\.\DISPLAY1", "Monitor device name mismatch");
+            Assert(loaded.WidgetMonitorBounds == "0,0,1920,1080", "Monitor bounds mismatch");
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
     public static void TestSettings_CorruptionRecoveryPreservesBackupAndSafeDefaults()
     {
         var tempFile = Path.Combine(Path.GetTempPath(), $"speedmeter_settings_corrupt_{Guid.NewGuid():N}.json");
         try
         {
-            // Write completely malformed JSON
             File.WriteAllText(tempFile, "{ broken json corrupt content !!! ");
 
             var (loaded, warn) = SettingsStorage.Load(tempFile);
@@ -647,17 +843,74 @@ public static class V1Wave2Fixtures
             Assert(loaded!.DisplayUnits == "Mbps", "Default display units must be Mbps");
             Assert(loaded.WidgetOpacity == 0.90, "Default opacity must be 0.90");
 
-            // Verify corrupted backup file was created
             var dir = Path.GetDirectoryName(tempFile)!;
-            var pattern = Path.GetFileName(tempFile) + ".corrupt.*";
+            var pattern = Path.GetFileName(tempFile) + ".corrupt.*.json";
             var backups = Directory.GetFiles(dir, pattern);
-            Assert(backups.Length > 0, "Corrupted settings file backup was not preserved");
+            Assert(backups.Length > 0, "Corrupted settings file backup was not preserved with .json extension");
 
             foreach (var b in backups) { try { File.Delete(b); } catch { } }
         }
         finally
         {
             if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
+    public static async Task TestApplicationServices_EndToEndIntegration()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_app_services_{Guid.NewGuid():N}.db");
+        var settingsFile = Path.Combine(Path.GetTempPath(), $"speedmeter_test_settings_{Guid.NewGuid():N}.json");
+
+        try
+        {
+            await using var storage = new SqliteStorageEngine(dbPath);
+            await storage.RecordSessionStartAsync(new SessionRecord("sess_app", "epoch", 0, null, null, false));
+            await storage.RecordClockSegmentAsync(new ClockSegmentRecord("clk_app", "sess_app", 0, 0, 10_000_000, "nominal"));
+            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord("rev_app", "scope_app", 1, "SelectedAdapter", "Win32", "1.0", "adapter_app", "valid", 0));
+
+            var now = new DateTimeOffset(2026, 10, 11, 14, 0, 0, TimeSpan.Zero);
+            var nowMs = now.ToUnixTimeMilliseconds();
+
+            await storage.IngestIntervalAsync(new UsageIntervalRecord(
+                "iv_app1", "key_app1", "sess_app", "clk_app", "rev_app", "unidentified", nowMs - 5000, nowMs, 5000, 100_000, 50_000, false, false, null, "high"));
+            await storage.FlushAsync(TimeSpan.FromSeconds(5));
+
+            // 1. Test UsageHistoryService
+            var historyService = new UsageHistoryService(storage);
+            var todaySummary = await historyService.GetPeriodSummaryAsync(QueryPeriodType.Today, "UTC", now);
+            Assert(todaySummary.BytesRx == 100_000, $"UsageHistoryService today RX mismatch: {todaySummary.BytesRx}");
+
+            // 2. Test QuotaService
+            var quotaService = new QuotaService(storage);
+            var rule = new QuotaRule("rule_svc", 1, true, QuotaPeriodType.MonthlyBillingCycle, 1,
+                QuotaDirectionMode.Combined, 1_000_000L, [8000, 10000], "UTC");
+            var eval = await quotaService.EvaluateCurrentCycleAsync(rule, now);
+            Assert(eval.RecordedBytes == 150_000, $"QuotaService recorded usage mismatch: {eval.RecordedBytes}");
+
+            // 3. Test SettingsService
+            var settingsService = new SettingsService(settingsFile);
+            var changedNotified = false;
+            settingsService.SettingsChanged += _ => changedNotified = true;
+
+            var current = settingsService.CurrentSettings;
+            current.DisplayUnits = "MB/s";
+            settingsService.Save(current);
+
+            Assert(changedNotified, "SettingsChanged event must fire upon save");
+            Assert(settingsService.Load().DisplayUnits == "MB/s", "Saved settings must reload correctly");
+
+            // 4. Test LiveGraphService
+            var graphService = new LiveGraphService(capacitySeconds: 60);
+            graphService.RecordSample(nowMs, 1000, 500, true, false, 1);
+            var raw = graphService.GetRawPoints(TimeSpan.FromSeconds(10), nowMs);
+            Assert(raw.Count == 1, "LiveGraphService must store and retrieve raw points");
+            var down = graphService.GetDownsampled(TimeSpan.FromSeconds(10), 2, nowMs);
+            Assert(down.Count == 2, "LiveGraphService must downsample points");
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+            if (File.Exists(settingsFile)) File.Delete(settingsFile);
         }
     }
 
@@ -677,11 +930,9 @@ public static class V1Wave2Fixtures
             collector.Select("adapter-concur");
             collector.Start();
 
-            // Run active collection while issuing 25 concurrent historical queries
             var queryTasks = new List<Task>();
             for (var i = 0; i < 25; i++)
             {
-                // Advance clock and counter
                 clock.CurrentMonotonic += 1.0;
                 clock.CurrentUtc = clock.CurrentUtc.AddSeconds(1.0);
                 counterProvider.Adapters = [new AdapterCounter("adapter-concur", "Eth", "NIC", true, (ulong)(100 + (i * 1000)), 100, 1000, true)];

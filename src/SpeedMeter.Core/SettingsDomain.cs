@@ -46,6 +46,12 @@ public sealed class SpeedMeterSettings
     [JsonPropertyName("widgetY")]
     public double? WidgetY { get; set; }
 
+    [JsonPropertyName("widgetMonitorDeviceName")]
+    public string? WidgetMonitorDeviceName { get; set; }
+
+    [JsonPropertyName("widgetMonitorBounds")]
+    public string? WidgetMonitorBounds { get; set; }
+
     [JsonPropertyName("scopeMode")]
     public string ScopeMode { get; set; } = "AutoPrimary";
 
@@ -178,6 +184,15 @@ public static class SettingsStorage
                 throw new JsonException("Deserialized settings returned null.");
             }
 
+            // CRITICAL DEF-B02: Reject incompatible future schema versions without clobbering file
+            if (loaded.SchemaVersion > SpeedMeterSettings.CurrentSchemaVersion)
+            {
+                var warn = $"Incompatible future settings schema version {loaded.SchemaVersion} (current supported: {SpeedMeterSettings.CurrentSchemaVersion}). Preserved original file and loaded safe in-memory defaults.";
+                var safeDefault = new SpeedMeterSettings();
+                safeDefault.Sanitize();
+                return (safeDefault, warn);
+            }
+
             loaded.Sanitize();
             return (loaded, null);
         }
@@ -186,7 +201,7 @@ public static class SettingsStorage
             var warn = $"Settings file corrupted ({ex.Message}). Preserved backup and loaded safe defaults.";
             try
             {
-                var corruptBackup = $"{filePath}.corrupt.{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+                var corruptBackup = $"{filePath}.corrupt.{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.json";
                 File.Copy(filePath, corruptBackup, overwrite: true);
             }
             catch { }

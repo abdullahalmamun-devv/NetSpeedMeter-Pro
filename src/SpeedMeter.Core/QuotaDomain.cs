@@ -19,7 +19,23 @@ public enum QuotaPeriodType
 }
 
 /// <summary>
+/// Canonical billing cycle identifier generator.
+/// Stable across locales, operating systems, and process restarts.
+/// </summary>
+public static class BillingCycleIdentity
+{
+    public static string Create(string ruleId, int ruleRevision, long startUtcMs, long endUtcMs, string timezoneId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ruleId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(timezoneId);
+        var safeTz = timezoneId.Replace('/', '_').Replace('\\', '_').Replace(' ', '_');
+        return $"{ruleId}_r{ruleRevision}_{startUtcMs}_{endUtcMs}_{safeTz}";
+    }
+}
+
+/// <summary>
 /// Domain model for quota configuration rules.
+/// Warning thresholds are specified in basis points (e.g. 8000 = 80.00%, 10000 = 100.00%).
 /// </summary>
 public sealed record QuotaRule(
     string RuleId,
@@ -29,11 +45,16 @@ public sealed record QuotaRule(
     int CycleDay,
     QuotaDirectionMode DirectionMode,
     long LimitBytes,
-    IReadOnlyList<double> WarningThresholds,
+    IReadOnlyList<int> WarningThresholdsBps,
     string ReportingTimezoneId,
     long OpeningBalanceBytes = 0,
     long EffectiveFromUtcMs = 0)
 {
+    /// <summary>
+    /// PRD §11.2 authoritative default warning thresholds: 80%, 90%, 100% (8000, 9000, 10000 bps).
+    /// </summary>
+    public static readonly IReadOnlyList<int> DefaultThresholdsBps = [8000, 9000, 10000];
+
     public void Validate()
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(RuleId);
@@ -42,12 +63,44 @@ public sealed record QuotaRule(
         if (LimitBytes <= 0) throw new ArgumentOutOfRangeException(nameof(LimitBytes), "LimitBytes must be strictly positive.");
         if (OpeningBalanceBytes < 0) throw new ArgumentOutOfRangeException(nameof(OpeningBalanceBytes), "OpeningBalanceBytes cannot be negative.");
         ArgumentException.ThrowIfNullOrWhiteSpace(ReportingTimezoneId);
-        ArgumentNullException.ThrowIfNull(WarningThresholds);
+        ArgumentNullException.ThrowIfNull(WarningThresholdsBps);
 
-        foreach (var t in WarningThresholds)
+        foreach (var t in WarningThresholdsBps)
         {
-            if (t <= 0.0) throw new ArgumentOutOfRangeException(nameof(WarningThresholds), "Thresholds must be positive.");
+            if (t <= 0 || t > 50000)
+            {
+                throw new ArgumentOutOfRangeException(nameof(WarningThresholdsBps), $"Threshold {t} bps must be between 1 and 50000 (0.01% to 500%).");
+            }
         }
+
+        if (WarningThresholdsBps.Distinct().Count() != WarningThresholdsBps.Count)
+        {
+            throw new ArgumentException("Duplicate warning thresholds are not permitted.", nameof(WarningThresholdsBps));
+        }
+    }
+
+    /// <summary>
+    /// Creates a revised rule with incremented revision number and optional updated parameters.
+    /// Preserves immutable identity of prior revision.
+    /// </summary>
+    public QuotaRule CreateRevision(
+        long? newLimitBytes = null,
+        IReadOnlyList<int>? newThresholdsBps = null,
+        int? newCycleDay = null,
+        QuotaDirectionMode? newDirectionMode = null,
+        long? newOpeningBalanceBytes = null,
+        bool? newEnabled = null)
+    {
+        return this with
+        {
+            Revision = this.Revision + 1,
+            LimitBytes = newLimitBytes ?? this.LimitBytes,
+            WarningThresholdsBps = newThresholdsBps ?? this.WarningThresholdsBps,
+            CycleDay = newCycleDay ?? this.CycleDay,
+            DirectionMode = newDirectionMode ?? this.DirectionMode,
+            OpeningBalanceBytes = newOpeningBalanceBytes ?? this.OpeningBalanceBytes,
+            Enabled = newEnabled ?? this.Enabled
+        };
     }
 }
 
@@ -64,18 +117,23 @@ public sealed record QuotaEvaluation(
     long RemainingBytes,
     double UsedRatio,
     bool IsExceeded,
-    IReadOnlyList<double> CrossedThresholds,
-    IReadOnlyList<double> NewlyCrossedThresholds);
+    IReadOnlyList<int> CrossedThresholdsBps,
+    IReadOnlyList<int> NewlyCrossedThresholdsBps)
+{
+    public long OverageBytes => Math.Max(0L, EffectiveUsedBytes - LimitBytes);
+    public double PercentUsed => LimitBytes > 0 ? (double)EffectiveUsedBytes / LimitBytes * 100.0 : 0.0;
+}
 
 /// <summary>
 /// Persistent record of a triggered quota threshold event to ensure deduplication across restarts.
+/// Uses exact integer basis points (e.g. 8000 = 80.00%) for deterministic uniqueness identity.
 /// </summary>
 public sealed record QuotaThresholdEvent(
     string EventId,
     string RuleId,
     int RuleRevision,
     string CycleIdentifier,
-    double ThresholdPercent,
+    int ThresholdBps,
     long CrossedAtUtcMs,
     long EffectiveUsageBytes);
 
@@ -91,26 +149,10 @@ public static class QuotaEvaluator
         QuotaRule rule,
         long recordedRx,
         long recordedTx,
-        IReadOnlyList<double> previouslyEmittedThresholds)
+        IReadOnlyList<int> previouslyEmittedThresholdsBps)
     {
         ArgumentNullException.ThrowIfNull(rule);
         rule.Validate();
-
-        if (!rule.Enabled)
-        {
-            return new QuotaEvaluation(
-                rule.RuleId,
-                rule.Revision,
-                0,
-                rule.OpeningBalanceBytes,
-                rule.OpeningBalanceBytes,
-                rule.LimitBytes,
-                Math.Max(0L, rule.LimitBytes - rule.OpeningBalanceBytes),
-                rule.LimitBytes > 0 ? (double)rule.OpeningBalanceBytes / rule.LimitBytes : 0.0,
-                rule.OpeningBalanceBytes >= rule.LimitBytes,
-                [],
-                []);
-        }
 
         // Select traffic based on direction mode
         var recordedApplicable = rule.DirectionMode switch
@@ -121,31 +163,47 @@ public static class QuotaEvaluator
             _ => checked(recordedRx + recordedTx)
         };
 
-        // Enforce PRD §22 & Prompt §44/45: EffectiveUsage = Recorded + OpeningBalance
         var effectiveUsed = checked(recordedApplicable + rule.OpeningBalanceBytes);
         var remaining = effectiveUsed >= rule.LimitBytes ? 0L : rule.LimitBytes - effectiveUsed;
-        var ratio = (double)effectiveUsed / rule.LimitBytes;
+        var ratio = rule.LimitBytes > 0 ? (double)effectiveUsed / rule.LimitBytes : 0.0;
         var isExceeded = effectiveUsed >= rule.LimitBytes;
 
-        // Evaluate thresholds using Int128 arithmetic to eliminate 64-bit overflow
-        var crossed = new List<double>();
-        var newlyCrossed = new List<double>();
-
-        var sortedThresholds = rule.WarningThresholds.OrderBy(t => t).ToList();
-        var prevFiredSet = new HashSet<double>(previouslyEmittedThresholds ?? []);
-
-        foreach (var th in sortedThresholds)
+        if (!rule.Enabled)
         {
-            // Calculate threshold byte target: floor((Int128)LimitBytes * (Int128)Round(th * 10000) / 10000)
-            var thMultiplier = (long)Math.Round(th * 10000.0);
-            var targetBytes = (long)(((Int128)rule.LimitBytes * thMultiplier) / 10000);
+            // PRD: Do not return misleading zeros for recorded usage when rule is disabled.
+            // Recorded traffic remains truthful; alerts/notifications are simply suppressed.
+            return new QuotaEvaluation(
+                rule.RuleId,
+                rule.Revision,
+                recordedApplicable,
+                rule.OpeningBalanceBytes,
+                effectiveUsed,
+                rule.LimitBytes,
+                remaining,
+                ratio,
+                isExceeded,
+                [],
+                []);
+        }
+
+        // Evaluate thresholds using exact Int128 arithmetic to eliminate 64-bit overflow and rounding drift
+        var crossed = new List<int>();
+        var newlyCrossed = new List<int>();
+
+        var sortedThresholds = rule.WarningThresholdsBps.OrderBy(t => t).ToList();
+        var prevFiredSet = new HashSet<int>(previouslyEmittedThresholdsBps ?? []);
+
+        foreach (var thBps in sortedThresholds)
+        {
+            // Target bytes = floor((Int128)LimitBytes * thBps / 10000)
+            var targetBytes = (long)(((Int128)rule.LimitBytes * thBps) / 10000);
 
             if (effectiveUsed >= targetBytes)
             {
-                crossed.Add(th);
-                if (!prevFiredSet.Contains(th))
+                crossed.Add(thBps);
+                if (!prevFiredSet.Contains(thBps))
                 {
-                    newlyCrossed.Add(th);
+                    newlyCrossed.Add(thBps);
                 }
             }
         }

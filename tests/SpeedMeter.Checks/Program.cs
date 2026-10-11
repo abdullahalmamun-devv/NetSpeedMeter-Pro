@@ -7,10 +7,28 @@ if (SpeedMeter.Checks.AuditFixtures.TryRunChild(args) is int childExit) return c
 if (SpeedMeter.Checks.V1FoundationFixtures.TryRunChild(args) is int v1ChildExit) return v1ChildExit;
 
 var passed = 0;
+var skipped = 0;
+var failed = 0;
+
 void Check(string name, Action action)
 {
-    try { action(); Console.WriteLine("PASS " + name); passed++; }
-    catch (Exception ex) { Console.Error.WriteLine("FAIL " + name + ": " + ex.Message); Environment.ExitCode = 1; }
+    try
+    {
+        action();
+        Console.WriteLine("PASS " + name);
+        passed++;
+    }
+    catch (SpeedMeter.Checks.SkipCheckException skip)
+    {
+        Console.WriteLine($"SKIP {name} ({skip.Message})");
+        skipped++;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine("FAIL " + name + ": " + ex.Message);
+        failed++;
+        Environment.ExitCode = 1;
+    }
 }
 void Require(bool condition, string message) { if (!condition) throw new Exception(message); }
 AdapterCounter Counter(ulong rx, ulong tx = 0, string id = "a", bool up = true) => new(id, "Test adapter", "Fixture", up, rx, tx, 0);
@@ -181,5 +199,5 @@ if (args.Contains("--windows"))
 
     SpeedMeter.Checks.PerfFixtures.Run(Check);
 }
-Console.WriteLine($"{passed} checks passed. Exit code: {Environment.ExitCode}.");
+Console.WriteLine($"Checks summary: {passed} passed, {skipped} skipped, {failed} failed. Total evaluated: {passed + skipped + failed}. Exit code: {Environment.ExitCode}.");
 return Environment.ExitCode;

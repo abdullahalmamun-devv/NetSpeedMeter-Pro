@@ -1,0 +1,20 @@
+# V1 Gate B Verification Matrix
+
+| Domain | Previous Claim | Code Reality Before Audit | Independent Verification / Fixture | Defect ID | Remediated Status |
+|---|---|---|---|---|---|
+| **Timezone DST** | Handles DST spring forward / fall back | Hardcoded `TimeSpan.FromHours(1)` gap; skipped 30m transitions | `W2-CALENDAR: Dynamic non-one-hour DST resolution (Lord Howe Island 30m delta)` | **DEF-B01** | **VERIFIED AFTER REPAIR** |
+| **Settings Versioning** | Migrates and version-guards settings | Accepted `schemaVersion: 999` and overwrote file on save | `W2-SETTINGS: SettingsStorage rejects future schema version without modifying file` | **DEF-B02** | **VERIFIED AFTER REPAIR** |
+| **Quota Truthfulness** | Evaluates quota truthfully | Returned `RecordedBytes = 0` when rule was disabled | `W2-QUOTA: Disabled quota rule truthfully preserves recorded bytes without zeroing` | **DEF-B03** | **VERIFIED AFTER REPAIR** |
+| **Quota Deduplication** | Persistent SQLite deduplication | `threshold_percent REAL` in `UNIQUE` constraint; unit naming mismatch | `W2-QUOTA: Basis points validation, PRD defaults, and canonical billing cycle identity` | **DEF-B04** | **VERIFIED AFTER REPAIR** |
+| **Historical Range Totals** | Range totals conserve bytes | `GetTotalBytesAsync` returned entire interval bytes without split | `W2-HIST: GetTotalBytesAsync allocates partial ranges using IntegerSplitter` | **DEF-B05** | **VERIFIED AFTER REPAIR** |
+| **Half-Open Range Bounds** | `[start, end)` semantics | `GetIntervalsAsync` used inclusive `>=` and `<=`, returning boundary-touching rows | `W2-HIST: Strict boundary inequality excludes boundary-touching intervals` | **DEF-B06** | **VERIFIED AFTER REPAIR** |
+| **Coverage Semantics** | Tracks observed and missing duration | Denominator ignored unexplained collection holes; reported false 100% | `W2-HIST: Coverage denominator truthfully reflects unexplained missing spans` | **DEF-B07** | **VERIFIED AFTER REPAIR** |
+| **Rollup Provenance** | Generates daily rollups | Hardcoded `canonical_all` and `unidentified`; ad-hoc `tz.GetUtcOffset(date)` | `W2-HIST: Daily rollup generation preserves distinct scope and network dimensions` | **DEF-B08** | **VERIFIED AFTER REPAIR** |
+| **Test Quality** | 137 checks passed | `catch { return; }` on missing timezone silently incremented pass count | `W2-CALENDAR: Missing environment timezone reports explicit SKIP instead of false pass` | **DEF-B09** | **VERIFIED AFTER REPAIR** |
+| **Application Layer** | Ready for UI integration | Zero application service facades in `SpeedMeter.Application` | `W2-SERVICES: Application services (History, Quota, Settings, Graph) end-to-end integration` | **DEF-B10** | **VERIFIED AFTER REPAIR** |
+| **Monitor Identity** | Persistent widget position | Persisted only `WidgetX` and `WidgetY`, omitting monitor identity | `W2-SETTINGS: SettingsStorage persists monitor identity and work area anchors` | **DEF-B11** | **VERIFIED AFTER REPAIR** |
+| **Live Graph Chronology** | Monotonic ring buffer | Allowed out-of-order points; claimed zero steady-state allocation on downsample | `W2-GRAPH: LiveGraphBuffer rejects out-of-order points and resolves duplicate timestamps` | **DEF-B12** | **VERIFIED AFTER REPAIR** |
+| **Quota Revisioning** | Revisioned rules and stable cycles | Ad-hoc cycle string formatting and manual rule revision | `W2-QUOTA: Basis points validation, PRD defaults, and canonical billing cycle identity` | **DEF-B13** | **VERIFIED AFTER REPAIR** |
+| **Partition Conservation** | Exact integer partition conservation | Verified with `Int128` cumulative allocation | `W2-SPLIT: IntegerSplitter seeded randomized property testing across 10000 cases` | None | **VERIFIED** |
+| **Keyset Paging** | Keyset cursor pagination over intervals | Verified stable cursor traversal | `W2-HIST: Keyset cursor pagination over intervals provides stable deterministic traversal` | None | **VERIFIED** |
+| **Concurrency** | Concurrent sampling and queries | Verified WAL single-writer under query load | `W2-CONCURRENCY: Active background Collector persistence runs alongside concurrent queries without stall` | None | **VERIFIED** |

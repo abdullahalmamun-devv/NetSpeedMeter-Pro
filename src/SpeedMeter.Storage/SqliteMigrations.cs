@@ -220,10 +220,10 @@ public static class SqliteMigrations
                         rule_id TEXT NOT NULL,
                         rule_revision INTEGER NOT NULL CHECK(rule_revision > 0),
                         cycle_identifier TEXT NOT NULL,
-                        threshold_percent REAL NOT NULL CHECK(threshold_percent > 0),
+                        threshold_bps INTEGER NOT NULL CHECK(threshold_bps > 0),
                         crossed_at_utc_ms INTEGER NOT NULL,
                         effective_usage_bytes INTEGER NOT NULL,
-                        UNIQUE(rule_id, rule_revision, cycle_identifier, threshold_percent)
+                        UNIQUE(rule_id, rule_revision, cycle_identifier, threshold_bps)
                     ) STRICT;
 
                     INSERT INTO schema_migrations (version, migration_id, checksum, applied_at_utc_ms)
