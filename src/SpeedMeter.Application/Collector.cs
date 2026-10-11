@@ -17,6 +17,7 @@ public sealed record CollectorSnapshot(
     AdapterObservation Observation)
 {
     public CanonicalScopeDecision? ScopeDecision { get; init; }
+    public StorageStatus? StorageStatus { get; init; }
 }
 
 /// <summary>
@@ -312,12 +313,16 @@ public sealed class Collector : IDisposable
                     PersistInterval(reading, adapter, time);
                 }
 
-                snapshot = Publish(reading.State switch
+                var state = reading.State switch
                 {
-                    ReadingState.Live => CollectorState.Running,
+                    ReadingState.Live => storage is not null && storage.Status.Health != StorageHealth.Healthy
+                        ? CollectorState.Degraded
+                        : CollectorState.Running,
                     ReadingState.Measuring => CollectorState.Starting,
                     _ => CollectorState.Degraded
-                }, reading);
+                };
+
+                snapshot = Publish(state, reading);
             }
         }
         return snapshot;
@@ -325,13 +330,14 @@ public sealed class Collector : IDisposable
 
     private void PersistInterval(Reading reading, AdapterCounter? adapter, ClockReading time)
     {
+        var durationTicks = (long)((reading.IntervalDurationSeconds ?? interval) * 10_000_000);
+        var endUtcMs = reading.Timestamp.ToUnixTimeMilliseconds();
+        var startUtcMs = endUtcMs - (long)((reading.IntervalDurationSeconds ?? interval) * 1000);
+
         try
         {
             var rxSigned = CheckedIntegerMath.CheckedToSigned(reading.IntervalBytesRx!.Value, "rx delta");
             var txSigned = CheckedIntegerMath.CheckedToSigned(reading.IntervalBytesTx!.Value, "tx delta");
-            var durationTicks = (long)((reading.IntervalDurationSeconds ?? interval) * 10_000_000);
-            var endUtcMs = reading.Timestamp.ToUnixTimeMilliseconds();
-            var startUtcMs = endUtcMs - (long)((reading.IntervalDurationSeconds ?? interval) * 1000);
 
             var intervalRec = new UsageIntervalRecord(
                 Guid.NewGuid().ToString("D"),
@@ -349,11 +355,11 @@ public sealed class Collector : IDisposable
                 false,
                 null,
                 "nominal");
-            _ = storage!.IngestIntervalAsync(intervalRec);
 
+            CounterCheckpointRecord? cp = null;
             if (adapter is not null)
             {
-                var cp = new CounterCheckpointRecord(
+                cp = new CounterCheckpointRecord(
                     Guid.NewGuid().ToString("D"),
                     sessionId,
                     adapter.Id,
@@ -364,12 +370,29 @@ public sealed class Collector : IDisposable
                     endUtcMs,
                     BigEndianCodec.EncodeUInt64(adapter.Received),
                     BigEndianCodec.EncodeUInt64(adapter.Sent));
-                _ = storage.RecordCheckpointAsync(cp);
             }
+
+            // Atomic ingestion: interval and checkpoint committed in the same transaction
+            _ = storage!.IngestIntervalAsync(intervalRec, cp);
         }
         catch (StorageCapacityExceededException)
         {
-            // Capacity exceeded: degraded durable state
+            // Capacity exceeded: rebaseline to halt delta contamination and record explicit gap
+            engine.Interrupt(time.UtcNow, ReadingState.Discontinuity,
+                "Counter delta exceeded storage capacity. Establishing new baseline.", time.MonotonicSeconds);
+
+            var gap = new UsageIntervalRecord(
+                Guid.NewGuid().ToString("D"),
+                $"{sessionId}_cap_exceeded_{sequence}",
+                sessionId,
+                clockSegmentId,
+                scopeRevisionId,
+                "unidentified",
+                startUtcMs,
+                endUtcMs,
+                durationTicks,
+                0, 0, true, true, "capacity_exceeded", "unreliable");
+            _ = storage?.IngestGapAsync(gap);
         }
     }
 
@@ -407,7 +430,8 @@ public sealed class Collector : IDisposable
     {
         latest = new(++sequence, state, reading, observation)
         {
-            ScopeDecision = scopeDecision
+            ScopeDecision = scopeDecision,
+            StorageStatus = storage?.Status
         };
         pendingNotification = latest;
         if (!notifying)
@@ -487,18 +511,24 @@ public sealed class Collector : IDisposable
                 // Unclean exit gap detection: if the previous session was not ended cleanly
                 if (last is not null && last.SessionId != sessionId && !last.EndedCleanly && last.EndedAtUtcMs is null)
                 {
-                    var crashGap = new UsageIntervalRecord(
-                        Guid.NewGuid().ToString("D"),
-                        $"{sessionId}_crash_gap",
-                        sessionId,
-                        clockSegmentId,
-                        scopeRevisionId,
-                        "unidentified",
-                        last.StartedAtUtcMs,
-                        startMs,
-                        null,
-                        0, 0, true, true, "unclean_shutdown", "estimated");
-                    await storage.IngestGapAsync(crashGap).ConfigureAwait(false);
+                    var lastDurableMs = await storage.GetLastDurableTimestampUtcMsAsync(last.SessionId).ConfigureAwait(false);
+                    var gapStartMs = lastDurableMs ?? last.StartedAtUtcMs;
+
+                    if (gapStartMs < startMs)
+                    {
+                        var crashGap = new UsageIntervalRecord(
+                            Guid.NewGuid().ToString("D"),
+                            $"{sessionId}_crash_gap",
+                            sessionId,
+                            clockSegmentId,
+                            scopeRevisionId,
+                            "unidentified",
+                            gapStartMs,
+                            startMs,
+                            null,
+                            0, 0, true, true, "unclean_shutdown", "estimated");
+                        await storage.IngestGapAsync(crashGap).ConfigureAwait(false);
+                    }
                 }
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)

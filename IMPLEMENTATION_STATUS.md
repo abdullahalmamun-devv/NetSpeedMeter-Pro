@@ -1,13 +1,13 @@
 # Implementation status
 
 **Current release:** 0.1.0 development prototype; no GA release.  
-**Current milestone:** V1.0 Production Engineering — FOUNDATION WAVE 1 COMPLETE · INTEGRATION GATE A PASSED.  
+**Current milestone:** V1.0 Production Engineering — INDEPENDENT GATE A FORENSIC AUDIT COMPLETE · GATE A VERIFIED AFTER REPAIRS · WAVE 2 AUTHORIZED.  
 **Updated:** 11 October 2026 (Asia/Dhaka).
 
 ## Build / test status
 
 - **Build:** Succeeded with 0 warnings, 0 errors across 6 projects (`Core`, `Windows`, `Storage`, `Application`, `App`, `Checks`) using .NET 10 SDK 10.0.401.
-- **Fixtures:** 106/106 deterministic checks passing via `scripts/check.ps1 -Windows`:
+- **Fixtures:** 116/116 deterministic checks passing via `scripts/check.ps1 -Windows`:
   - 14 baseline arithmetic and boundary checks
   - 21 epoch, large counter, and delta discontinuity fixtures (including mandatory 125 MB / 10s = 12.5 MB/s and 100 Mbps)
   - 7 application collector lifecycle and resilience fixtures
@@ -27,6 +27,17 @@
     - `V1-LIFECYCLE`: Unclean shutdown is detected and recorded as a crash gap on restart
     - `V1-INTEGRATION`: Collector + RouteProvider + StorageEngine end-to-end persists exact interval bytes and checkpoints
     - `V1-RESILIENCE`: Storage degradation does not crash collector or drop live observations
+  - 10 V1 Foundation Gate A forensic audit fixtures in `V1FoundationFixtures.cs`:
+    - `V1-AUDIT`: Crash gap start matches last durable interval end with zero history overlap (remedies DEF-01)
+    - `V1-AUDIT`: Empty crashed session falls back to session start for crash gap
+    - `V1-AUDIT`: Incompatible future schema version is rejected without mutating database (remedies DEF-03)
+    - `V1-AUDIT`: Interval and counter checkpoint committed atomically in single transaction (remedies DEF-05)
+    - `V1-AUDIT`: Duplicate interval ID is rejected idempotently by primary key constraint
+    - `V1-AUDIT`: Child process out-of-process restart preserves exact bytes and metadata
+    - `V1-AUDIT`: Forced FailFast process crash recovers accurate crash gap without overlap
+    - `V1-AUDIT`: Degraded storage truthfully transitions collector snapshot to Degraded state (remedies DEF-02)
+    - `V1-AUDIT`: Queue capacity saturation transitions storage health to Degraded (remedies DEF-06)
+    - `V1-AUDIT`: Capacity overflow delta forces engine discontinuity rebaseline and gap record (remedies DEF-04)
   - 3 performance and stability benchmarks (preliminary microbenchmarks)
   - 4 live Windows IP Helper, RouteProvider, and TaskbarCompanion checks
 - **UI Smoke:** Real WPF shell and productionized floating widget smoke test passing via `scripts/smoke.ps1` on Windows build 19045 (`.NET 10.0.12`).

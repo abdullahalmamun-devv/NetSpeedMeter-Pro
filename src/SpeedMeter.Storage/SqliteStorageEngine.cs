@@ -19,17 +19,19 @@ public sealed class SqliteStorageEngine : IStorageEngine
     private sealed record ScopeRevisionCmd(ScopeRevisionRecord Record) : IStorageCommand;
     private sealed record ScopeMembershipCmd(ScopeMembershipRecord Record) : IStorageCommand;
     private sealed record CheckpointCmd(CounterCheckpointRecord Record) : IStorageCommand;
-    private sealed record IntervalCmd(UsageIntervalRecord Record) : IStorageCommand;
+    private sealed record IntervalCmd(UsageIntervalRecord Record, CounterCheckpointRecord? Checkpoint = null) : IStorageCommand;
     private sealed record GapCmd(UsageIntervalRecord Record) : IStorageCommand;
     private sealed record FlushCmd(TaskCompletionSource<bool> Tcs) : IStorageCommand;
 
     private readonly string connectionString;
+    private readonly int channelCapacity;
     private readonly Channel<IStorageCommand> channel;
     private readonly Task writerTask;
     private readonly CancellationTokenSource cts = new();
 
     private long enqueuedCount;
     private long persistedIntervals;
+    private long persistedCheckpoints;
     private long persistedGaps;
     private volatile StorageHealth health = StorageHealth.Healthy;
     private volatile string? degradedReason;
@@ -42,9 +44,10 @@ public sealed class SqliteStorageEngine : IStorageEngine
         Interlocked.Read(ref persistedGaps),
         degradedReason);
 
-    public SqliteStorageEngine(string databasePath, int channelCapacity = 2048)
+    public SqliteStorageEngine(string databasePath, int channelCapacity = 500)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
+        this.channelCapacity = channelCapacity > 0 ? channelCapacity : 500;
 
         var dir = Path.GetDirectoryName(databasePath);
         if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
@@ -61,14 +64,25 @@ public sealed class SqliteStorageEngine : IStorageEngine
         connectionString = builder.ToString();
 
         // Initialize schema and migrations
-        using (var initConn = CreateConnection())
+        try
         {
+            using var initConn = CreateConnection();
             initConn.Open();
             ConfigurePragmas(initConn);
             SqliteMigrations.ApplyMigrations(initConn);
         }
+        catch (IncompatibleSchemaException ex)
+        {
+            health = StorageHealth.Degraded;
+            degradedReason = ex.Message;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            health = StorageHealth.Degraded;
+            degradedReason = $"Database initialization failed: {ex.Message}";
+        }
 
-        var channelOptions = new BoundedChannelOptions(channelCapacity)
+        var channelOptions = new BoundedChannelOptions(this.channelCapacity)
         {
             FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
@@ -128,11 +142,11 @@ public sealed class SqliteStorageEngine : IStorageEngine
         await EnqueueCommandAsync(new CheckpointCmd(checkpoint), ct).ConfigureAwait(false);
     }
 
-    public async Task IngestIntervalAsync(UsageIntervalRecord interval, CancellationToken ct = default)
+    public async Task IngestIntervalAsync(UsageIntervalRecord interval, CounterCheckpointRecord? checkpoint = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(interval);
         if (interval.IsGap) throw new ArgumentException("Use IngestGapAsync for gap records.", nameof(interval));
-        await EnqueueCommandAsync(new IntervalCmd(interval), ct).ConfigureAwait(false);
+        await EnqueueCommandAsync(new IntervalCmd(interval, checkpoint), ct).ConfigureAwait(false);
     }
 
     public async Task IngestGapAsync(UsageIntervalRecord gap, CancellationToken ct = default)
@@ -146,6 +160,13 @@ public sealed class SqliteStorageEngine : IStorageEngine
     {
         if (disposed) throw new ObjectDisposedException(nameof(SqliteStorageEngine));
         Interlocked.Increment(ref enqueuedCount);
+
+        if (channel.Reader.Count >= channelCapacity * 0.9)
+        {
+            health = StorageHealth.Degraded;
+            degradedReason = "Storage write queue saturated.";
+        }
+
         try
         {
             await channel.Writer.WriteAsync(cmd, ct).ConfigureAwait(false);
@@ -249,6 +270,11 @@ public sealed class SqliteStorageEngine : IStorageEngine
                             break;
                         case IntervalCmd iv:
                             ExecuteInterval(conn, tx, iv.Record);
+                            if (iv.Checkpoint is not null)
+                            {
+                                ExecuteCheckpoint(conn, tx, iv.Checkpoint);
+                                Interlocked.Increment(ref persistedCheckpoints);
+                            }
                             Interlocked.Increment(ref persistedIntervals);
                             break;
                         case GapCmd gap:
@@ -453,6 +479,26 @@ public sealed class SqliteStorageEngine : IStorageEngine
                 reader.GetInt32(5) == 1);
         }
         return null;
+    }
+
+    public async Task<long?> GetLastDurableTimestampUtcMsAsync(string sessionId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        using var conn = CreateConnection();
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+        ConfigurePragmas(conn);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT MAX(ts) FROM (
+                SELECT MAX(end_utc_ms) AS ts FROM usage_intervals WHERE session_id = @sid
+                UNION ALL
+                SELECT MAX(observed_at_utc_ms) AS ts FROM counter_checkpoints WHERE session_id = @sid
+            );
+        ";
+        cmd.Parameters.AddWithValue("@sid", sessionId);
+        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is not null && result != DBNull.Value ? Convert.ToInt64(result) : null;
     }
 
     public async Task<IReadOnlyList<UsageIntervalRecord>> GetIntervalsAsync(

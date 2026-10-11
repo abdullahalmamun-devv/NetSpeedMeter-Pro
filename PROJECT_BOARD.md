@@ -1,10 +1,10 @@
 # Current milestone
 
-**V1.0 Production Engineering — FOUNDATION WAVE 1 COMPLETE · INTEGRATION GATE A PASSED.** Canonical persistent accounting stream declared stable. 106 automated tests passing with exit code 0. Canonical scope routing with flapping debounce and dual-stack handling integrated into live Collector. SQLite storage engine implemented with single background writer, WAL mode, PRAGMAs, lossless 8-byte big-endian BLOB counter checkpoints, checked signed integer math, compound primary keys without null duplication bug, versioned migrations, and unclean exit recovery. Storage degradation resilience verified without collector crash. Project Director: lead agent. Updated 11 October 2026 (Asia/Dhaka).
+**V1.0 Production Engineering — INDEPENDENT GATE A FORENSIC AUDIT COMPLETE · GATE A VERIFIED AFTER REPAIRS · WAVE 2 AUTHORIZED.** Canonical persistent accounting stream forensic audit completed. 116 automated checks passing with exit code 0. UI smoke test passing with exit code 0. 6 defects remediated (DEF-01 through DEF-06) including zero-overlap crash gap invariant, truthful degraded snapshot surface, future schema rejection, delta overflow rebaselining, atomic interval+checkpoint commits, and queue backpressure. Out-of-process restart and crash recovery verified without mocks. Project Director: lead agent. Updated 11 October 2026 (Asia/Dhaka).
 
 # In progress
 
-None. V1 Foundation Wave 1 tasks are complete, reviewed, and integrated.
+None. V1 Foundation Gate A audit and repairs are complete. V1 Wave 2 implementation authorized to begin.
 
 # Ready (Next Wave: V1.0 Wave 2 — Ledger, Quotas & Dashboard)
 
@@ -23,6 +23,7 @@ None currently.
 
 | Task | Owner | Reviewer | Completion Evidence |
 |---|---|---|---|
+| V1-AUDIT-001 | Audit Team / Director | Software Architect + QA | Independent forensic audit of V1 accounting, scope, storage, and crash recovery. Resolved DEF-01 (zero overlap crash gap), DEF-02 (degraded storage state), DEF-03 (future schema rejection), DEF-04 (delta overflow rebaselining), DEF-05 (atomic checkpoint ingestion), and DEF-06 (queue backpressure). 116 automated checks pass. Verified by child process restart and crash tests. `GATE A VERIFIED AFTER REPAIRS — WAVE 2 AUTHORIZED`. |
 | V1-SCOPE-001 | Windows Platform + Measurement | Architect + QA + Director | Canonical `RouteProvider` (dual-stack IPv4/IPv6), `ScopeStabilizer` (3.0s debounce), and dynamic `AutoPrimary` integrated into `Collector` and `MeasurementEngine.RebaselineForScopeChange`. Zero throughput spikes, preserved cumulative session bytes. Verified by fixtures. |
 | V1-STORE-001 | Storage / Data Engineer | Architect + QA + Director | `SpeedMeter.Storage` project: `Microsoft.Data.Sqlite 9.0.2`, `SQLitePCLRaw.bundle_e_sqlite3 2.1.12` (GHSA-2m69-gcr7-jv3q resolved), single writer via bounded `Channel`, WAL mode, `PRAGMA synchronous = FULL; foreign_keys = ON; busy_timeout = 5000;`, 8-byte big-endian BLOB counter checkpoints, checked signed integer math, compound PK without null duplicate bug. Verified by restart byte preservation and rollup uniqueness fixtures. |
 | V1-LIFECYCLE-001 | Application Engineer + Storage | QA + Director | Session, clock segment, scope revision records, and explicit gap records (`user_paused`, `system_sleep`, `unclean_shutdown`). Crash gap recovery on restart verified by `TestStorage_UncleanShutdownRecoveryRecordsCrashGap`. Storage degradation resilience verified. |

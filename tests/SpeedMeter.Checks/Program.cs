@@ -4,6 +4,7 @@ using SpeedMeter.Core;
 using SpeedMeter.Windows;
 
 if (SpeedMeter.Checks.AuditFixtures.TryRunChild(args) is int childExit) return childExit;
+if (SpeedMeter.Checks.V1FoundationFixtures.TryRunChild(args) is int v1ChildExit) return v1ChildExit;
 
 var passed = 0;
 void Check(string name, Action action)

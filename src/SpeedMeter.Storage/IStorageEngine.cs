@@ -15,10 +15,11 @@ public interface IStorageEngine : IAsyncDisposable, IDisposable
     Task RecordScopeRevisionAsync(ScopeRevisionRecord revision, CancellationToken ct = default);
     Task RecordScopeMembershipAsync(ScopeMembershipRecord membership, CancellationToken ct = default);
     Task RecordCheckpointAsync(CounterCheckpointRecord checkpoint, CancellationToken ct = default);
-    Task IngestIntervalAsync(UsageIntervalRecord interval, CancellationToken ct = default);
+    Task IngestIntervalAsync(UsageIntervalRecord interval, CounterCheckpointRecord? checkpoint = null, CancellationToken ct = default);
     Task IngestGapAsync(UsageIntervalRecord gap, CancellationToken ct = default);
 
     Task<SessionRecord?> GetLastSessionAsync(CancellationToken ct = default);
+    Task<long?> GetLastDurableTimestampUtcMsAsync(string sessionId, CancellationToken ct = default);
     Task<IReadOnlyList<UsageIntervalRecord>> GetIntervalsAsync(string? scopeRevisionId = null, long? startUtcMs = null, long? endUtcMs = null, CancellationToken ct = default);
     Task<(long TotalRx, long TotalTx)> GetTotalBytesAsync(string? scopeRevisionId = null, long? startUtcMs = null, long? endUtcMs = null, CancellationToken ct = default);
 

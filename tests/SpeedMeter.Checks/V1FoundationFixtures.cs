@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using SpeedMeter.Application;
@@ -44,6 +46,17 @@ public static class V1FoundationFixtures
         check("V1-LIFECYCLE: Unclean shutdown is detected and recorded as a crash gap on restart", () => TestStorage_UncleanShutdownRecoveryRecordsCrashGap().GetAwaiter().GetResult());
         check("V1-INTEGRATION: Collector + RouteProvider + StorageEngine end-to-end persists exact interval bytes and checkpoints", () => TestCollector_EndToEndIntegrationWithScopeAndStorage().GetAwaiter().GetResult());
         check("V1-RESILIENCE: Storage degradation does not crash collector or drop live observations", TestCollector_StorageDegradationDoesNotCrashSampling);
+
+        check("V1-AUDIT: Crash gap start matches last durable interval end with zero history overlap", () => TestStorage_CrashGapDoesNotOverlapValidHistory().GetAwaiter().GetResult());
+        check("V1-AUDIT: Empty crashed session falls back to session start for crash gap", () => TestStorage_EmptyCrashedSessionRecoversFullSessionGap().GetAwaiter().GetResult());
+        check("V1-AUDIT: Incompatible future schema version is rejected without mutating database", () => TestStorage_IncompatibleNewerSchemaRejected().GetAwaiter().GetResult());
+        check("V1-AUDIT: Interval and counter checkpoint committed atomically in single transaction", () => TestStorage_IntervalAndCheckpointCommittedAtomically().GetAwaiter().GetResult());
+        check("V1-AUDIT: Duplicate interval ID is rejected idempotently by primary key constraint", () => TestStorage_IdempotentDuplicateIntervalRejected().GetAwaiter().GetResult());
+        check("V1-AUDIT: Child process out-of-process restart preserves exact bytes and metadata", () => TestStorage_SeparateProcessRestartPreservesExactBytes().GetAwaiter().GetResult());
+        check("V1-AUDIT: Forced FailFast process crash recovers accurate crash gap without overlap", () => TestStorage_ForcedProcessCrashRecoversAccurateGap().GetAwaiter().GetResult());
+        check("V1-AUDIT: Degraded storage truthfully transitions collector snapshot to Degraded state", () => TestCollector_SurfacesStorageDegradationOnSnapshot().GetAwaiter().GetResult());
+        check("V1-AUDIT: Queue capacity saturation transitions storage health to Degraded", () => TestStorage_QueueSaturationTriggersDegradedState().GetAwaiter().GetResult());
+        check("V1-AUDIT: Capacity overflow delta forces engine discontinuity rebaseline and gap record", () => TestStorage_CapacityExceededTriggersRebaselineAndGap().GetAwaiter().GetResult());
     }
 
     public static void TestScopeIntegration_AutoPrimaryFollowsRouteChanges()
@@ -446,6 +459,554 @@ public static class V1FoundationFixtures
             counterProvider.Adapters = [new AdapterCounter("adapter-1", "Eth", "NIC", true, 200, 200, 1000, true)];
             var snap2 = collector.SampleOnce();
             Assert(snap2 != null, "SampleOnce must survive closed/degraded storage");
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+        }
+    }
+
+    public static int? TryRunChild(string[] args)
+    {
+        var arg = args.FirstOrDefault(a => a.StartsWith("--v1-child=", StringComparison.Ordinal));
+        if (arg is null) return null;
+        var command = arg["--v1-child=".Length..];
+        try
+        {
+            if (command.StartsWith("write-and-exit:", StringComparison.Ordinal))
+            {
+                var dbPath = command["write-and-exit:".Length..];
+                ChildWriteAndExit(dbPath).GetAwaiter().GetResult();
+                return 0;
+            }
+            if (command.StartsWith("write-and-crash:", StringComparison.Ordinal))
+            {
+                var dbPath = command["write-and-crash:".Length..];
+                ChildWriteAndCrash(dbPath).GetAwaiter().GetResult();
+                return 0;
+            }
+            Console.Error.WriteLine("Unknown --v1-child scenario: " + command);
+            return 1;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("V1 child error: " + ex);
+            return 1;
+        }
+    }
+
+    private static async Task ChildWriteAndExit(string dbPath)
+    {
+        var sessionId = "child_session_clean";
+        var clockSegId = "child_clock_seg";
+        var scopeRevId = "child_scope_rev";
+
+        await using var storage = new SqliteStorageEngine(dbPath);
+        await storage.RecordSessionStartAsync(new SessionRecord(sessionId, "epoch_child", 10000, null, null, false));
+        await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clockSegId, sessionId, 0, 10000, 10_000_000, "nominal"));
+        await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(scopeRevId, "scope-1", 1, "SelectedAdapter", "Win32", "1.0", "adapter-1", "valid", 10000));
+
+        await storage.IngestIntervalAsync(new UsageIntervalRecord(
+            Guid.NewGuid().ToString("D"), $"{sessionId}_iv_1", sessionId, clockSegId, scopeRevId, "unidentified",
+            10000, 11000, 10_000_000, 25_000_000, 2_500_000, false, false, null, "nominal"));
+
+        await storage.IngestIntervalAsync(new UsageIntervalRecord(
+            Guid.NewGuid().ToString("D"), $"{sessionId}_iv_2", sessionId, clockSegId, scopeRevId, "unidentified",
+            11000, 12000, 10_000_000, 50_000_000, 5_000_000, false, false, null, "nominal"));
+
+        await storage.RecordSessionEndAsync(sessionId, DateTimeOffset.FromUnixTimeMilliseconds(12000), true, "normal_exit");
+        await storage.FlushAsync(TimeSpan.FromSeconds(5));
+    }
+
+    private static async Task ChildWriteAndCrash(string dbPath)
+    {
+        var sessionId = "child_session_crashed";
+        var clockSegId = "child_clock_seg";
+        var scopeRevId = "child_scope_rev";
+
+        await using var storage = new SqliteStorageEngine(dbPath);
+        await storage.RecordSessionStartAsync(new SessionRecord(sessionId, "epoch_child", 10000, null, null, false));
+        await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clockSegId, sessionId, 0, 10000, 10_000_000, "nominal"));
+        await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(scopeRevId, "scope-1", 1, "SelectedAdapter", "Win32", "1.0", "adapter-1", "valid", 10000));
+
+        await storage.IngestIntervalAsync(new UsageIntervalRecord(
+            Guid.NewGuid().ToString("D"), $"{sessionId}_iv_1", sessionId, clockSegId, scopeRevId, "unidentified",
+            10000, 11000, 10_000_000, 10_000_000, 1_000_000, false, false, null, "nominal"));
+
+        await storage.IngestIntervalAsync(new UsageIntervalRecord(
+            Guid.NewGuid().ToString("D"), $"{sessionId}_iv_2", sessionId, clockSegId, scopeRevId, "unidentified",
+            11000, 12000, 10_000_000, 15_000_000, 1_500_000, false, false, null, "nominal"));
+
+        await storage.FlushAsync(TimeSpan.FromSeconds(5));
+
+        // Abrupt termination without clean session end or shutdown
+        Process.GetCurrentProcess().Kill();
+    }
+
+    private static int RunChildProcess(string scenario)
+    {
+        var executable = Environment.ProcessPath ?? throw new InvalidOperationException("Process path unavailable.");
+        var start = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        if (string.Equals(Path.GetFileNameWithoutExtension(executable), "dotnet", StringComparison.OrdinalIgnoreCase))
+        {
+            start.ArgumentList.Add(System.Reflection.Assembly.GetExecutingAssembly().Location);
+        }
+        start.ArgumentList.Add("--v1-child=" + scenario);
+        using var child = Process.Start(start) ?? throw new InvalidOperationException("V1 child process failed to start.");
+        if (!child.WaitForExit(10000))
+        {
+            child.Kill(entireProcessTree: true);
+            child.WaitForExit();
+            throw new InvalidOperationException("V1 child process timed out.");
+        }
+        return child.ExitCode;
+    }
+
+    public static async Task TestStorage_CrashGapDoesNotOverlapValidHistory()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_no_overlap_{Guid.NewGuid():N}.db");
+        var crashedSessionId = "crashed_session_overlap_test";
+        var clockSegId = "crashed_clock_seg";
+        var scopeRevId = "crashed_scope_rev";
+
+        try
+        {
+            // Seed a crashed session with two valid intervals: 10000..11000 (100 MB), 11000..12000 (150 MB)
+            await using (var storage = new SqliteStorageEngine(dbPath))
+            {
+                await storage.RecordSessionStartAsync(new SessionRecord(crashedSessionId, "epoch_crash", 10000, null, null, false));
+                await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clockSegId, crashedSessionId, 0, 10000, 10_000_000, "nominal"));
+                await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(scopeRevId, "scope-1", 1, "SelectedAdapter", "Win32", "1.0", "adapter-1", "valid", 10000));
+
+                await storage.IngestIntervalAsync(new UsageIntervalRecord(
+                    Guid.NewGuid().ToString("D"), $"{crashedSessionId}_iv_1", crashedSessionId, clockSegId, scopeRevId, "unidentified",
+                    10000, 11000, 10_000_000, 100_000_000, 10_000_000, false, false, null, "nominal"));
+
+                await storage.IngestIntervalAsync(new UsageIntervalRecord(
+                    Guid.NewGuid().ToString("D"), $"{crashedSessionId}_iv_2", crashedSessionId, clockSegId, scopeRevId, "unidentified",
+                    11000, 12000, 10_000_000, 150_000_000, 15_000_000, false, false, null, "nominal"));
+
+                await storage.FlushAsync(TimeSpan.FromSeconds(5));
+            }
+
+            // Start collector on that DB at 20000 ms to trigger crash gap recovery
+            var clock = new StubClock { CurrentMonotonic = 100.0, CurrentUtc = DateTimeOffset.FromUnixTimeMilliseconds(20000) };
+            var counterProvider = new StubCounterProvider();
+
+            await using (var storage = new SqliteStorageEngine(dbPath))
+            {
+                using var collector = new Collector(counterProvider, clock, storage: storage);
+                collector.Start();
+
+                await Task.Delay(250);
+                await storage.FlushAsync(TimeSpan.FromSeconds(5));
+
+                var intervals = await storage.GetIntervalsAsync();
+                Assert(intervals.Count == 3, $"Expected 3 intervals (2 valid + 1 crash gap), found {intervals.Count}");
+
+                var crashGap = intervals.Single(i => i.IsGap && i.GapReason == "unclean_shutdown");
+                // DEF-01 verification: Crash gap MUST start at 12000 (last durable interval end), NOT 10000 (session start)
+                Assert(crashGap.StartUtcMs == 12000, $"Crash gap start must be 12000, was {crashGap.StartUtcMs}");
+                Assert(crashGap.EndUtcMs == 20000, $"Crash gap end must be 20000, was {crashGap.EndUtcMs}");
+
+                // Database invariant: Zero temporal overlap between any valid interval and any gap interval
+                using var conn = new SqliteConnection($"Data Source={dbPath}");
+                await conn.OpenAsync();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT COUNT(*) FROM usage_intervals i
+                    JOIN usage_intervals g ON i.is_gap = 0 AND g.is_gap = 1
+                    WHERE i.start_utc_ms < g.end_utc_ms AND i.end_utc_ms > g.start_utc_ms;
+                ";
+                var overlapCount = Convert.ToInt64(await cmd.ExecuteScalarAsync());
+                Assert(overlapCount == 0, $"Crash gap overlap detected! Overlap count: {overlapCount}");
+
+                // Exact byte accounting is completely preserved
+                var totals = await storage.GetTotalBytesAsync();
+                Assert(totals.TotalRx == 250_000_000, $"Total RX mismatch: {totals.TotalRx}");
+                Assert(totals.TotalTx == 25_000_000, $"Total TX mismatch: {totals.TotalTx}");
+            }
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+        }
+    }
+
+    public static async Task TestStorage_EmptyCrashedSessionRecoversFullSessionGap()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_empty_crash_{Guid.NewGuid():N}.db");
+        var emptyCrashedSessionId = "empty_crashed_session";
+
+        try
+        {
+            // Seed a session that crashed before writing any interval or checkpoint
+            await using (var storage = new SqliteStorageEngine(dbPath))
+            {
+                await storage.RecordSessionStartAsync(new SessionRecord(emptyCrashedSessionId, "epoch_empty", 4000, null, null, false));
+                await storage.FlushAsync(TimeSpan.FromSeconds(5));
+            }
+
+            var clock = new StubClock { CurrentMonotonic = 100.0, CurrentUtc = DateTimeOffset.FromUnixTimeMilliseconds(16000) };
+            var counterProvider = new StubCounterProvider();
+
+            await using (var storage = new SqliteStorageEngine(dbPath))
+            {
+                using var collector = new Collector(counterProvider, clock, storage: storage);
+                collector.Start();
+
+                await Task.Delay(250);
+                await storage.FlushAsync(TimeSpan.FromSeconds(5));
+
+                var intervals = await storage.GetIntervalsAsync();
+                Assert(intervals.Count == 1, $"Expected 1 crash gap interval, found {intervals.Count}");
+
+                var crashGap = intervals[0];
+                Assert(crashGap.IsGap && crashGap.GapReason == "unclean_shutdown", "Must be unclean_shutdown gap");
+                // Without previous intervals, fallback starts at session start (4000)
+                Assert(crashGap.StartUtcMs == 4000, $"Gap start should be 4000, got {crashGap.StartUtcMs}");
+                Assert(crashGap.EndUtcMs == 16000, $"Gap end should be 16000, got {crashGap.EndUtcMs}");
+            }
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+        }
+    }
+
+    public static async Task TestStorage_IncompatibleNewerSchemaRejected()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_schema_{Guid.NewGuid():N}.db");
+        try
+        {
+            // Create database with future schema version (PRAGMA user_version = 999)
+            using (var conn = new SqliteConnection($"Data Source={dbPath}"))
+            {
+                await conn.OpenAsync();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "PRAGMA user_version = 999;";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            // Opening with current engine must reject future schema without throwing or corrupting
+            await using (var storage = new SqliteStorageEngine(dbPath))
+            {
+                Assert(storage.Status.Health == StorageHealth.Degraded, $"Storage health should be Degraded, was {storage.Status.Health}");
+                Assert(storage.Status.DegradedReason != null && storage.Status.DegradedReason.Contains("newer than supported"),
+                    $"Expected schema error detail, got: {storage.Status.DegradedReason}");
+            }
+
+            // Verify user_version was NOT mutated
+            using (var conn = new SqliteConnection($"Data Source={dbPath}"))
+            {
+                await conn.OpenAsync();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "PRAGMA user_version;";
+                var ver = Convert.ToInt64(await cmd.ExecuteScalarAsync());
+                Assert(ver == 999, $"user_version must remain 999, got {ver}");
+            }
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+        }
+    }
+
+    public static async Task TestStorage_IntervalAndCheckpointCommittedAtomically()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_atomic_{Guid.NewGuid():N}.db");
+        var sessionId = "atomic_session";
+        var clockSegId = "atomic_clock";
+        var scopeRevId = "atomic_scope";
+        var intervalId = Guid.NewGuid().ToString("D");
+        var checkpointId = Guid.NewGuid().ToString("D");
+
+        try
+        {
+            await using var storage = new SqliteStorageEngine(dbPath);
+            await storage.RecordSessionStartAsync(new SessionRecord(sessionId, "epoch", 1000, null, null, false));
+            await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clockSegId, sessionId, 0, 1000, 10_000_000, "nominal"));
+            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(scopeRevId, "scope-1", 1, "SelectedAdapter", "Win32", "1.0", "eth-1", "valid", 1000));
+
+            var iv = new UsageIntervalRecord(
+                intervalId, "atomic_key_1", sessionId, clockSegId, scopeRevId, "unidentified",
+                1000, 2000, 10_000_000, 500_000, 50_000, false, false, null, "nominal");
+
+            var cp = new CounterCheckpointRecord(
+                checkpointId, sessionId, "eth-1", "iphlpapi.GetIfTable2", "epoch_1", 1,
+                10_000_000, 2000, BigEndianCodec.EncodeUInt64(500_000), BigEndianCodec.EncodeUInt64(50_000));
+
+            await storage.IngestIntervalAsync(iv, cp);
+            await storage.FlushAsync(TimeSpan.FromSeconds(5));
+
+            using var conn = new SqliteConnection($"Data Source={dbPath}");
+            await conn.OpenAsync();
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM usage_intervals WHERE interval_id = @id;";
+            cmd.Parameters.AddWithValue("@id", intervalId);
+            var ivCount = Convert.ToInt64(await cmd.ExecuteScalarAsync());
+            Assert(ivCount == 1, $"Interval must be committed: {ivCount}");
+
+            using var cmdCp = conn.CreateCommand();
+            cmdCp.CommandText = "SELECT observed_sequence FROM counter_checkpoints WHERE checkpoint_id = @id;";
+            cmdCp.Parameters.AddWithValue("@id", checkpointId);
+            var cpSeq = Convert.ToInt64(await cmdCp.ExecuteScalarAsync());
+            Assert(cpSeq == 1, $"Checkpoint sequence mismatch: {cpSeq}");
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+        }
+    }
+
+    public static async Task TestStorage_IdempotentDuplicateIntervalRejected()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_idempotent_{Guid.NewGuid():N}.db");
+        var sessionId = "idemp_session";
+        var clockSegId = "idemp_clock";
+        var scopeRevId = "idemp_scope";
+        var intervalId = "fixed_interval_unique_id";
+
+        try
+        {
+            await using var storage = new SqliteStorageEngine(dbPath);
+            await storage.RecordSessionStartAsync(new SessionRecord(sessionId, "epoch", 1000, null, null, false));
+            await storage.RecordClockSegmentAsync(new ClockSegmentRecord(clockSegId, sessionId, 0, 1000, 10_000_000, "nominal"));
+            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord(scopeRevId, "scope-1", 1, "SelectedAdapter", "Win32", "1.0", "eth-1", "valid", 1000));
+
+            var iv = new UsageIntervalRecord(
+                intervalId, "fixed_key_1", sessionId, clockSegId, scopeRevId, "unidentified",
+                1000, 2000, 10_000_000, 100_000, 10_000, false, false, null, "nominal");
+
+            await storage.IngestIntervalAsync(iv);
+            await storage.FlushAsync(TimeSpan.FromSeconds(5));
+
+            // Ingesting the same interval_id again must be rejected by PRIMARY KEY
+            await storage.IngestIntervalAsync(iv);
+            try
+            {
+                await storage.FlushAsync(TimeSpan.FromSeconds(2));
+            }
+            catch (Exception) { /* Expected failure on duplicate primary key */ }
+
+            using var conn = new SqliteConnection($"Data Source={dbPath}");
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM usage_intervals WHERE interval_id = @id;";
+            cmd.Parameters.AddWithValue("@id", intervalId);
+            var count = Convert.ToInt64(await cmd.ExecuteScalarAsync());
+            Assert(count == 1, $"Duplicate interval must not create duplicate records: {count}");
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+        }
+    }
+
+    public static async Task TestStorage_SeparateProcessRestartPreservesExactBytes()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_proc_restart_{Guid.NewGuid():N}.db");
+        try
+        {
+            // Execute child process: writes 25MB + 50MB Rx, cleanly exits
+            var exitCode = RunChildProcess("write-and-exit:" + dbPath);
+            Assert(exitCode == 0, $"Child writer process failed with exit code: {exitCode}");
+
+            // Parent process opens database and verifies durability across process boundary
+            await using var storage = new SqliteStorageEngine(dbPath);
+            var lastSession = await storage.GetLastSessionAsync();
+            Assert(lastSession != null, "Last session record must survive out-of-process restart");
+            Assert(lastSession!.EndedCleanly, "Session must be marked ended cleanly by child");
+            Assert(lastSession.EndedAtUtcMs == 12000, "EndedAtUtcMs mismatch");
+
+            var totals = await storage.GetTotalBytesAsync();
+            Assert(totals.TotalRx == 75_000_000, $"Total RX mismatch across process boundary: {totals.TotalRx}");
+            Assert(totals.TotalTx == 7_500_000, $"Total TX mismatch across process boundary: {totals.TotalTx}");
+
+            var intervals = await storage.GetIntervalsAsync();
+            Assert(intervals.Count == 2, $"Expected 2 intervals, found {intervals.Count}");
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+        }
+    }
+
+    public static async Task TestStorage_ForcedProcessCrashRecoversAccurateGap()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_proc_crash_{Guid.NewGuid():N}.db");
+        try
+        {
+            // Execute child process which calls Environment.FailFast
+            var exitCode = RunChildProcess("write-and-crash:" + dbPath);
+            Assert(exitCode != 0, "Child process should have exited abnormally via FailFast");
+
+            // Parent process starts collector on the crashed DB at 25000 ms
+            var clock = new StubClock { CurrentMonotonic = 100.0, CurrentUtc = DateTimeOffset.FromUnixTimeMilliseconds(25000) };
+            var counterProvider = new StubCounterProvider();
+
+            await using (var storage = new SqliteStorageEngine(dbPath))
+            {
+                using var collector = new Collector(counterProvider, clock, storage: storage);
+                collector.Start();
+
+                await Task.Delay(250);
+                await storage.FlushAsync(TimeSpan.FromSeconds(5));
+
+                var intervals = await storage.GetIntervalsAsync();
+                Assert(intervals.Count == 3, $"Expected 3 intervals (2 child + 1 crash gap), got {intervals.Count}");
+
+                var crashGap = intervals.Single(i => i.IsGap && i.GapReason == "unclean_shutdown");
+                // Child intervals ended at 12000 ms, so crash gap starts at 12000 ms with ZERO history overlap!
+                Assert(crashGap.StartUtcMs == 12000, $"Crash gap start must be 12000, was {crashGap.StartUtcMs}");
+                Assert(crashGap.EndUtcMs == 25000, $"Crash gap end must be 25000, was {crashGap.EndUtcMs}");
+
+                var totals = await storage.GetTotalBytesAsync();
+                Assert(totals.TotalRx == 25_000_000, $"Total RX mismatch after crash recovery: {totals.TotalRx}");
+                Assert(totals.TotalTx == 2_500_000, $"Total TX mismatch after crash recovery: {totals.TotalTx}");
+
+                // Invariant query: zero overlap between any interval and gap
+                using var conn = new SqliteConnection($"Data Source={dbPath}");
+                await conn.OpenAsync();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT COUNT(*) FROM usage_intervals i
+                    JOIN usage_intervals g ON i.is_gap = 0 AND g.is_gap = 1
+                    WHERE i.start_utc_ms < g.end_utc_ms AND i.end_utc_ms > g.start_utc_ms;
+                ";
+                var overlapCount = Convert.ToInt64(await cmd.ExecuteScalarAsync());
+                Assert(overlapCount == 0, $"Crash recovery created overlapping interval! Overlap count: {overlapCount}");
+            }
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+        }
+    }
+
+    public static async Task TestCollector_SurfacesStorageDegradationOnSnapshot()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_surface_deg_{Guid.NewGuid():N}.db");
+        try
+        {
+            // Seed DB with incompatible schema version so storage initializes in Degraded state
+            using (var conn = new SqliteConnection($"Data Source={dbPath}"))
+            {
+                await conn.OpenAsync();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "PRAGMA user_version = 888;";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            var clock = new StubClock { CurrentMonotonic = 10.0 };
+            var counterProvider = new StubCounterProvider
+            {
+                Adapters = [new AdapterCounter("adapter-1", "Eth", "NIC", true, 100, 100, 1000, true)]
+            };
+
+            await using var storage = new SqliteStorageEngine(dbPath);
+            Assert(storage.Status.Health == StorageHealth.Degraded, "Storage must be Degraded due to schema incompatibility");
+
+            using var collector = new Collector(counterProvider, clock, storage: storage);
+            collector.Select("adapter-1");
+
+            // Baseline sample
+            var snap1 = collector.SampleOnce();
+            Assert(snap1.StorageStatus != null && snap1.StorageStatus.Health == StorageHealth.Degraded,
+                "Snapshot 1 must surface degraded storage status");
+
+            // Live sample: normally Running, but MUST be Degraded because storage is degraded
+            clock.CurrentMonotonic += 1.0;
+            counterProvider.Adapters = [new AdapterCounter("adapter-1", "Eth", "NIC", true, 200, 200, 1000, true)];
+            var snap2 = collector.SampleOnce();
+
+            Assert(snap2.State == CollectorState.Degraded, $"Truthful state must be Degraded, was {snap2.State}");
+            Assert(snap2.StorageStatus != null && snap2.StorageStatus.Health == StorageHealth.Degraded,
+                "Snapshot 2 must reflect storage health");
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+        }
+    }
+
+    public static async Task TestStorage_QueueSaturationTriggersDegradedState()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_sat_{Guid.NewGuid():N}.db");
+        try
+        {
+            // Engine with channelCapacity = 5 (threshold 90% is 4.5, so 5 queued items triggers saturation)
+            await using var storage = new SqliteStorageEngine(dbPath, channelCapacity: 5);
+
+            // Establish valid foreign key references first
+            await storage.RecordSessionStartAsync(new SessionRecord("sess_sat", "epoch_sat", 1000, null, null, false));
+            await storage.RecordClockSegmentAsync(new ClockSegmentRecord("clk_sat", "sess_sat", 0, 1000, 10_000_000, "nominal"));
+            await storage.RecordScopeRevisionAsync(new ScopeRevisionRecord("scope_sat", "scope-1", 1, "SelectedAdapter", "Win32", "1.0", "eth-1", "valid", 1000));
+            await storage.FlushAsync(TimeSpan.FromSeconds(5));
+
+            // Rapidly enqueue 15 gap records to saturate the channel
+            for (var i = 0; i < 15; i++)
+            {
+                _ = storage.IngestGapAsync(new UsageIntervalRecord(
+                    Guid.NewGuid().ToString("D"), $"gap_{i}", "sess_sat", "clk_sat", "scope_sat", "unidentified",
+                    1000 + (100 * i), 1000 + (100 * (i + 1)), 10_000_000, 0, 0, false, true, "sat_test", "nominal"));
+            }
+
+            // Verify degraded transition occurred
+            Assert(storage.Status.Health == StorageHealth.Degraded,
+                $"Storage health must be Degraded on queue saturation, was {storage.Status.Health}");
+            Assert(storage.Status.DegradedReason != null && storage.Status.DegradedReason.Contains("saturated"),
+                $"Degraded reason should mention saturation, got: {storage.Status.DegradedReason}");
+        }
+        finally
+        {
+            DeleteDbFiles(dbPath);
+        }
+    }
+
+    public static async Task TestStorage_CapacityExceededTriggersRebaselineAndGap()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"speedmeter_test_overflow_{Guid.NewGuid():N}.db");
+        var clock = new StubClock { CurrentMonotonic = 10.0, CurrentUtc = DateTimeOffset.FromUnixTimeMilliseconds(10000) };
+        var counterProvider = new StubCounterProvider
+        {
+            Adapters = [new AdapterCounter("adapter-ovf", "Eth", "NIC", true, 100, 100, 1000, true)]
+        };
+
+        try
+        {
+            await using var storage = new SqliteStorageEngine(dbPath);
+            using var collector = new Collector(counterProvider, clock, storage: storage);
+            collector.Select("adapter-ovf");
+
+            // Tick 1: Baseline sample
+            collector.SampleOnce();
+
+            // Tick 2: Counter jumps by more than signed long capacity (> 2^63 - 1)
+            clock.CurrentMonotonic += 1.0;
+            clock.CurrentUtc = clock.CurrentUtc.AddSeconds(1.0);
+            var overflowVal = (ulong)long.MaxValue + 5000UL;
+            counterProvider.Adapters = [new AdapterCounter("adapter-ovf", "Eth", "NIC", true, overflowVal, 100, 1000, true)];
+
+            var snap2 = collector.SampleOnce();
+            // Capacity exceeded triggers rebaseline: state should transition away from Live/Running
+            await storage.FlushAsync(TimeSpan.FromSeconds(5));
+
+            var intervals = await storage.GetIntervalsAsync();
+            var capGap = intervals.FirstOrDefault(i => i.GapReason == "capacity_exceeded");
+            Assert(capGap != null, "Storage must ingest explicit gap with reason 'capacity_exceeded'");
+            Assert(capGap!.IsGap, "Gap flag must be true");
+
+            // Totals must NOT contain corrupted overflowing bytes
+            var totals = await storage.GetTotalBytesAsync();
+            Assert(totals.TotalRx == 0, $"Total RX should remain 0, was {totals.TotalRx}");
         }
         finally
         {

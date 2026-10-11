@@ -3,6 +3,11 @@ using Microsoft.Data.Sqlite;
 
 namespace SpeedMeter.Storage;
 
+public sealed class IncompatibleSchemaException : Exception
+{
+    public IncompatibleSchemaException(string message) : base(message) { }
+}
+
 public static class SqliteMigrations
 {
     public const int CurrentSchemaVersion = 1;
@@ -27,6 +32,12 @@ public static class SqliteMigrations
 
         var currentVersion = GetLatestAppliedVersion(connection);
 
+        if (currentVersion > CurrentSchemaVersion)
+        {
+            throw new IncompatibleSchemaException(
+                $"Database schema version {currentVersion} is newer than supported version {CurrentSchemaVersion}. Execution on newer schema is not supported.");
+        }
+
         if (currentVersion < 1)
         {
             ApplyMigration1(connection);
@@ -35,10 +46,27 @@ public static class SqliteMigrations
 
     public static int GetLatestAppliedVersion(SqliteConnection connection)
     {
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT COALESCE(MAX(version), 0) FROM schema_migrations;";
-        var result = cmd.ExecuteScalar();
-        return Convert.ToInt32(result);
+        var migrationVersion = 0;
+        try
+        {
+            using var cmd1 = connection.CreateCommand();
+            cmd1.CommandText = "SELECT COALESCE(MAX(version), 0) FROM schema_migrations;";
+            var r1 = cmd1.ExecuteScalar();
+            if (r1 is not null && r1 != DBNull.Value) migrationVersion = Convert.ToInt32(r1);
+        }
+        catch { }
+
+        var userVersion = 0;
+        try
+        {
+            using var cmd2 = connection.CreateCommand();
+            cmd2.CommandText = "PRAGMA user_version;";
+            var r2 = cmd2.ExecuteScalar();
+            if (r2 is not null && r2 != DBNull.Value) userVersion = Convert.ToInt32(r2);
+        }
+        catch { }
+
+        return Math.Max(migrationVersion, userVersion);
     }
 
     private static void ApplyMigration1(SqliteConnection connection)
