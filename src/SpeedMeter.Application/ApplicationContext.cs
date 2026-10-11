@@ -17,6 +17,7 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
     private bool disposed;
 
     public Collector Collector => collector;
+    public CollectorShutdownResult? ShutdownResult => collector.ShutdownResult;
     public IStorageEngine Storage => storage;
     public IUsageHistoryService HistoryService => historyService;
     public IQuotaService QuotaService => quotaService;

@@ -1,26 +1,27 @@
 # Current milestone
 
-**V1.0 Production Engineering — V1 CORE TRUTH VERIFIED · NEXT FEATURE WAVE AUTHORIZED.** Independent V1 Core Truth closure complete. Resolved Blocker A (Scope UI invariants: programmatic binding guard in `ApplyInventory`, explicit `Automatic (Recommended)` item, strict non-fallback on missing adapter), Blocker B (Historical & Quota error UX truth: truthful unavailable indicators `—` on storage failure, monotonic query generation counters preventing out-of-order overwrite), and Blocker C (Durable pause/sleep gap persistence: exact elapsed span timestamps, pause-sleep precedence without overlapping gaps, idempotent pause/resume, shutdown gap flush). 183 automated checks passing, 1 check explicitly skipped (SkipCheckException demonstration), 0 failed. Real Windows UI smoke test passing with exit code 0 and all 18 native assertions True. Independent Audit Director: lead agent. Updated 11 October 2026 (Asia/Dhaka).
+**V1.0 Production Engineering — V1 CLOCK & SHUTDOWN TRUTH NOT VERIFIED · WAVE 4 BLOCKED.** The prior V1 Core Truth claim was too broad: lifecycle gap duration used UTC rather than the retained monotonic anchors, and shutdown persistence failures were silently swallowed. Repairs are integrated with 197 checks passing, 1 intentional skip, 0 failures, and 18/18 native WPF smoke assertions. The final gate remains blocked by the repeated-UTC nonoverlap conflict and open real sleep/timezone/shutdown evidence. Gate A/B/C and the scope/history UI fixes remain integrated. Updated 11 October 2026 (Asia/Dhaka).
 
 # In progress
 
-None. V1 Core Truth closure fully complete.
+None. V1 clock/shutdown code integration is complete; Wave 4 work has not begun.
 
 # Ready (Next Wave: V1.5 / Advanced Product Engineering)
 
 | Task | Owner | Reviewer | Dependency | Acceptance |
 |---|---|---|---|---|
-| V1.5-PLAN-001 | Project Director | Software Architect + Product | V1-TRUTH-001 | Author V1.5 Master Execution Plan covering least-privilege ETW network attribution research, dynamic light/system theming, and connectivity tools |
+| V1.5-PLAN-001 | Project Director | Software Architect + Product | V1-CLOCK-SHUTDOWN-TRUTH gate | Author V1.5 Master Execution Plan covering least-privilege ETW network attribution research, dynamic light/system theming, and connectivity tools |
 
 # Review
 
-None currently.
+None. Architect and QA review completed; the Director's gate decision is recorded below.
 
 # Done
 
 | Task | Owner | Reviewer | Completion Evidence |
 |---|---|---|---|
-| V1-TRUTH-001 | Independent Audit Director | Software Architect + QA | V1 Core Truth closure: Blocker A (Scope UI binding guards, `Automatic (Recommended)`, missing adapter placeholder without silent fallback), Blocker B (typed query error handling, truthful `—` displays, monotonic query generation protection), Blocker C (exact elapsed pause/sleep gap persistence, pause-sleep precedence, idempotent pause/resume, shutdown flush). 183 passed, 1 skipped, 0 failed. UI smoke verified with 18/18 native assertions True. `V1 CORE TRUTH VERIFIED — NEXT FEATURE WAVE AUTHORIZED`. |
+| V1-CLOCK-CODE-001 | Project Director + Network Measurement + QA | Architect + QA | Monotonic lifecycle gap duration, zero-width UTC discontinuity marker, new clock segments, inferred sleep fallback, history uncertainty, and structured shutdown result integrated. Release build 0 warnings/errors; 197 passed, 1 intentionally skipped, 0 failed; WPF smoke 18/18. Code integration accepted; this does not pass the V1 clock/shutdown gate. |
+| V1-TRUTH-001 | Independent Audit Director | Software Architect + QA | Historical closure of scope UI and history error UX (183 passed, 1 skipped; pre-change smoke 18/18). Its lifecycle timing and shutdown durability claims were superseded by V1-CLOCK-SHUTDOWN-TRUTH review; its Wave 4 authorization is withdrawn. |
 | V1-AUDIT-003 | Independent Audit Director | Software Architect + QA | Final Gate C native coordinate and UI truth closure: single native HWND positioning authority, elimination of `GetDpiForMonitor` in favor of `GetDpiForWindow`, explicit `DesignWidthDip`/`DesignHeightDip` constants, degradation axis decoupling (`StorageHealth` vs measurement availability), individual primary navigation assertions. 169 passed, 1 skipped, 0 failed. UI smoke verified with 18/18 native assertions True. `GATE C FULLY AND CORRECTLY CLOSED — NEXT V1 WAVE AUTHORIZED`. |
 | V1-DASH-001 | Desktop UI / UX | Accessibility + Product | Complete 5-destination navigation shell (`OverviewView`, `LiveTrafficView`, `AppsView`, `HistoryView`, `NetworkToolsView`, `SettingsView`), MVVM ViewModels, design tokens (`Tokens.xaml`, `ThemeDark.xaml`), tabular numerals, query cancellation token CTS in `HistoryViewModel`, basis points threshold formatting/parsing in `QuotaViewModel`, live graph windowing in `LiveTrafficViewModel`. Verified by fixtures and smoke test. |
 | V1-TRAY-001 | Windows Platform / UI | Architect + QA | `QuickPanelWindow` with multi-monitor work-area clamping, auto-dismiss on deactivate/Escape, Tray menu semantic click-through recovery intact, minimal floating widget synchronized. Verified by `W3-QUICKPANEL` and `smoke.ps1`. |
@@ -54,6 +55,7 @@ None currently.
 
 # Blocked / external evidence
 
+- V1 clock/shutdown gate: backward wall-clock jumps can repeat valid UTC labels across distinct clock segments; exact bytes and observed UTC cannot simultaneously satisfy a global zero-overlap UTC-row invariant. ADR-011 preserves both rows and marks affected summaries `ClockUncertain`. This conflicts with the handoff's literal no-valid-valid-overlap acceptance. Real sleep/hibernate, timezone-only reporting event, whole-app storage-disposal bound, and user-facing shutdown diagnostic path remain open.
 - Windows 11 compatibility matrix: host reports Windows 10 build 19045 (developer observation only, not release port approval). Windows 11 primary targets (26H2, 25H2), explicit compatibility lane (26H1), and transitional lane (24H2) require verification on designated test environments.
 - Sleep/resume hardware transitions and real Explorer restarts require controlled lab runs so as not to interrupt live host operations.
 

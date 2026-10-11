@@ -1,13 +1,13 @@
 # Implementation status
 
 **Current release:** 0.1.0 development prototype; no GA release.  
-**Current milestone:** V1.0 Production Engineering — V1 CORE TRUTH VERIFIED · NEXT FEATURE WAVE AUTHORIZED.  
+**Current milestone:** V1.0 Production Engineering — clock/shutdown truth gate not verified; Wave 4 blocked.
 **Updated:** 11 October 2026 (Asia/Dhaka).
 
 ## Build / test status
 
 - **Build:** Succeeded with 0 warnings, 0 errors across 6 projects (`Core`, `Windows`, `Storage`, `Application`, `App`, `Checks`) using .NET 10 SDK 10.0.401.
-- **Fixtures:** 183 passed, 1 skipped (explicit `SkipCheckException` test), 0 failed via `scripts/check.ps1 -Windows`:
+- **Fixtures:** 197 passed, 1 intentional skip, 0 failed via `scripts/check.ps1 -Windows` with process-local `NuGetAudit=false`. Without that override, restore is environment-blocked by the unreachable NuGet advisory index (`NU1900`). The executable runner also passed directly after offline restore. Counts below include the original groups plus 14 new clock/shutdown checks:
   - 14 baseline arithmetic and boundary checks
   - 21 epoch, large counter, and delta discontinuity fixtures (including mandatory 125 MB / 10s = 12.5 MB/s and 100 Mbps)
   - 7 application collector lifecycle and resilience fixtures
@@ -35,9 +35,10 @@
     - `W3-LIFECYCLE-SLEEP-GAP-DURATION`: System suspend and resume records actual elapsed sleep span
     - `W3-LIFECYCLE-PAUSE-SLEEP-PRECEDENCE`: Sleep during pause does not write overlapping gaps
     - `W3-LIFECYCLE-IDEMPOTENT-PAUSE-RESUME`: Repeated pause or resume calls do not create spurious gaps
+  - 14 adversarial clock and shutdown fixtures in `V1ClockShutdownFixtures.cs`: independent UTC/monotonic/awake movement, forward/backward jumps, repeated UTC labels, new clock segments, stable and inferred sleep, paused quit, injected gap/session-end/flush failures, and native awake-clock availability
   - 3 performance and stability benchmarks (preliminary microbenchmarks)
   - 4 live Windows IP Helper, RouteProvider, and TaskbarCompanion checks
-- **UI Smoke:** Real WPF shell, production navigation across all 5 primary views individually, Quick Panel, and floating widget smoke test passing via `scripts/smoke.ps1` on Windows build 19045 (`.NET 10.0.12`) with all 18 native assertions True.
+- **UI Smoke:** Post-change real WPF shell, production navigation across all 5 primary views individually, Quick Panel, and floating widget smoke passed via `scripts/smoke.ps1` on Windows build 19045 (`.NET 10.0.12`) with all 18 native assertions True (`artifacts/smoke-20261011-230102`). An earlier post-change run timed out because a modal shutdown warning blocked unattended exit; the modal warning was removed and the smoke passed.
 
 ## Implemented verified paths
 
@@ -72,7 +73,7 @@
   - Design tokens (`Tokens.xaml`, `ThemeDark.xaml`) with directional download `#3B82F6` and upload `#14B8A6`. Tabular numerals across all metrics.
   - Complete MVVM presentation architecture: `MainViewModel`, `OverviewViewModel`, `LiveTrafficViewModel`, `HistoryViewModel`, `QuotaViewModel`, `SettingsViewModel`, `QuickPanelViewModel`, `NetworkToolsViewModel`, `AppsViewModel`. Strict presentation boundary: zero direct references to `SpeedMeter.Storage` or `Microsoft.Data.Sqlite` in `SpeedMeter.App.dll`.
   - Modern navigation shell (`MainWindow.xaml`) with 5 primary destinations (Overview, Live Traffic, Apps, History, Network Tools) + Settings/About, dynamic `StorageDegradedBanner`, and live settings synchronization.
-  - `PlacementHelper`: Multi-monitor coordinate and per-monitor DPI DIP conversion using Win32 `MonitorFromPoint` and `GetDpiForMonitor`.
+  - `PlacementHelper`: Multi-monitor coordinate and per-monitor DPI DIP conversion using Win32 `MonitorFromPoint` and `GetDpiForWindow`.
   - `QuickPanelWindow`: Compact popup window with multi-monitor work-area clamping, Escape auto-dismiss, and pause toggle.
   - Native Win32 `GetIfTable2` adapter enumeration (35 adapters observed).
   - RouteProvider dual-stack egress candidate enumeration.
@@ -83,5 +84,12 @@
 
 - **Host Environment:** Microsoft Windows 10 Pro x64 (build 10.0.19045.0), 4 logical processors, .NET 10.0.12 runtime. Developer evidence only; not a release port authorization.
 - **Observed:**
-  - 169 passed checks, 1 skipped check, 0 failed checks. Exit code: 0.
-  - UI smoke test passed with all 18 native assertions verified (`True`). Exit code: 0. Window geometry: 1160x780. Click-through tray semantic recovery verified.
+  - 197 passed checks, 1 intentional skip, 0 failed checks. Exit code: 0. Offline NuGet audit override was required for restore; the executable fixture runner ran.
+  - Post-change UI smoke test passed with all 18 native assertions verified (`True`). Exit code: 0. Window geometry: 1160x780. Click-through tray semantic recovery verified.
+
+## Clock and shutdown truth limits
+
+- Production `MeasurementClock` uses .NET `Stopwatch`/Windows QPC for elapsed time, UTC for history placement, and Windows unbiased interrupt time to identify a missed suspend notification. On the observed Windows 10 build 19045 host, the precise API entry point was absent and the standard unbiased API returned a valid awake-time value. This is developer-host evidence, not Windows 11 certification.
+- Stable lifecycle gaps persist observed UTC endpoints and monotonic duration. A wall-clock jump produces a zero-width gap event plus a new clock segment. Affected calendar summaries report `ClockUncertain` and the UI suppresses the coverage percentage. Distinct valid readings can have repeated UTC labels across segments; exact bytes are preserved without falsely claiming globally disjoint UTC labels.
+- Normal quit keeps a structured `CollectorShutdownResult`, traces failures, and does not assert clean durability without successful flush barriers and healthy storage. The collector storage phase has a two-second deadline. Whole `ApplicationContext`/SQLite disposal timing and a bounded user-facing failure notification remain unverified.
+- Controlled hardware sleep/hibernate, timezone-only reporting changes, system clock changes on a live Windows host, Windows 11, and full AC-M05/M08/S05 acceptance remain environment-pending. No Wave 4 work is authorized.

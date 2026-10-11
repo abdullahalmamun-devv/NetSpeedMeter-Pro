@@ -725,11 +725,11 @@ public partial class MainWindow : Window
         monitor.SettingsService.SettingsChanged -= OnSettingsChanged;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
+        monitor.Dispose();
         tray.Visible = false;
         tray.Dispose();
         widget.Close();
         quickPanel.Close();
-        monitor.Dispose();
         Close();
         System.Windows.Application.Current.Shutdown();
     }

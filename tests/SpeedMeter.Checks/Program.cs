@@ -135,6 +135,7 @@ SpeedMeter.Checks.V1FoundationFixtures.Run(Check);
 SpeedMeter.Checks.V1Wave2Fixtures.Run(Check);
 SpeedMeter.Checks.V1Wave3Fixtures.Run(Check);
 SpeedMeter.Checks.V1CoreTruthFixtures.Run(Check);
+SpeedMeter.Checks.V1ClockShutdownFixtures.Run(Check);
 
 if (args.Contains("--windows"))
 {

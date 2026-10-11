@@ -2,9 +2,9 @@
 
 A high-performance, truthful Windows desktop network telemetry, accounting, and visualization application, engineered strictly from `Premium-Speed-Meter-PRD.md`.
 
-**Status: V1.0 Core Truth Verified · Production Desktop Surface Integrated (Gate A, B, and C Closed).**
+**Status: V1.0 clock and shutdown truth gate blocked · Wave 4 blocked.** Gate A, B, and C work remains integrated. The clock and shutdown repairs pass deterministic checks, but the final gate needs the evidence listed in `PROJECT_BOARD.md`.
 
-The full verification suite passes with 183 automated checks passed, 1 platform timezone check explicitly skipped, and 0 failures. The native WPF UI smoke test passes with all 18 native assertions verified (`True`) on Windows 10 x64.
+The executable Windows fixture run passed 197 checks, with 1 intentional skip and 0 failures. The post-change native WPF smoke passed all 18 assertions on Windows 10 x64. These results do not validate real hardware sleep or Windows 11.
 
 ---
 
@@ -25,14 +25,14 @@ Windows x64 and .NET SDK **10.0.401** are required. This repository includes a l
 
 ### 1. Telemetry & Measurement Engine
 - **Native Counter Acquisition:** Real-time 64-bit octet counters queried via Win32 IP Helper `GetIfTable2`. Loopback interfaces excluded.
-- **Monotonic Timing Domain:** Strict monotonic elapsed time intervals with microsecond precision. True rate calculations without synthetic zero smoothing.
+- **Monotonic Timing Domain:** Actual elapsed time from Windows QPC drives rate calculations; UTC places observations in history. A separate awake-time counter helps detect missed suspend notifications.
 - **Dynamic Route-Aware Scope:** Automatic primary egress detection (`RouteProvider`) with a 3.0-second debounce stabilizer (`ScopeStabilizer`) to eliminate route flapping. Preserves cumulative session octets while seamlessly rebaselining rates upon route handoff.
 - **Scope UI Protection:** Programmatic binding guards prevent UI adapter selection from overriding canonical `AutoPrimary` routing. When a selected adapter disconnects, the selection identity is preserved without silent fallback to another adapter.
 
 ### 2. Accounting Stream & Persistence
 - **Canonical Half-Open Intervals:** Persistent SQLite accounting stream structured into canonical `[StartUtcMs, EndUtcMs)` half-open intervals. Zero SQL `SUM()` queries over unpartitioned rows.
 - **Deterministic Integer Splitting:** `IntegerSplitter` uses `Int128` precision to distribute usage across calendar/billing boundaries while guaranteeing exact partition conservation ($\sum \text{allocated} \equiv \text{original}$) with zero truncation or rounding drift.
-- **Durable Lifecycle Gaps:** Pauses (`user_paused`), system sleep/hibernation (`system_sleep`), and crashes (`unclean_shutdown`) are recorded as durable non-overlapping gap records with exact elapsed timestamps.
+- **Lifecycle Gap Truth:** Pause and sleep gaps retain monotonic elapsed duration separately from observed UTC placement. A wall-clock jump creates a zero-width event marker and a new clock segment; affected calendar coverage is shown as uncertain. A normal quit confirms storage through flush barriers or reports failure.
 - **High-Performance Storage:** Managed SQLite WAL mode engine (`SpeedMeter.Storage`) with single-writer bounded channel, `PRAGMA synchronous = FULL`, foreign key validation, and BLOB counter checkpoints.
 
 ### 3. Usage, Calendar, Billing & Quota

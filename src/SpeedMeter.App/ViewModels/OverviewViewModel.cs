@@ -153,7 +153,9 @@ public sealed class OverviewViewModel : ViewModelBase
             TodayTotalText = MetricFormat.Bytes(summary.TotalBytes);
             TodayCoverageRatio = summary.CoverageRatio;
             TodayCompleteness = summary.Completeness;
-            TodayCoverageText = $"{summary.CoverageRatio * 100:F1}% · {summary.Completeness}";
+            TodayCoverageText = summary.Completeness == CompletenessState.ClockUncertain
+                ? "Clock changed · coverage uncertain"
+                : $"{summary.CoverageRatio * 100:F1}% · {summary.Completeness}";
         }
         catch (OperationCanceledException) { }
         catch (Exception)

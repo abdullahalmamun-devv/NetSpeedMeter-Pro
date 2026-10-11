@@ -11,6 +11,7 @@ public sealed class MonitorSession : IDisposable
 
     public Collector Collector => context.Collector;
     public CollectorSnapshot Latest => context.Collector.Latest;
+    public CollectorShutdownResult? ShutdownResult => context.ShutdownResult;
     public IUsageHistoryService HistoryService => context.HistoryService;
     public IQuotaService QuotaService => context.QuotaService;
     public ISettingsService SettingsService => context.SettingsService;

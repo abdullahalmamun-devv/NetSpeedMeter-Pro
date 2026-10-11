@@ -161,8 +161,6 @@ public sealed class SqliteStorageEngine : IStorageEngine
     private async ValueTask EnqueueCommandAsync(IStorageCommand cmd, CancellationToken ct)
     {
         if (disposed) throw new ObjectDisposedException(nameof(SqliteStorageEngine));
-        Interlocked.Increment(ref enqueuedCount);
-
         if (channel.Reader.Count >= channelCapacity * 0.9)
         {
             health = StorageHealth.Degraded;
@@ -172,6 +170,7 @@ public sealed class SqliteStorageEngine : IStorageEngine
         try
         {
             await channel.Writer.WriteAsync(cmd, ct).ConfigureAwait(false);
+            Interlocked.Increment(ref enqueuedCount);
         }
         catch (ChannelClosedException)
         {
@@ -185,12 +184,11 @@ public sealed class SqliteStorageEngine : IStorageEngine
     {
         if (disposed) return;
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await channel.Writer.WriteAsync(new FlushCmd(tcs), ct).ConfigureAwait(false);
-
         using var ctsTimeout = new CancellationTokenSource(timeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, ctsTimeout.Token);
         try
         {
+            await channel.Writer.WriteAsync(new FlushCmd(tcs), linked.Token).ConfigureAwait(false);
             await tcs.Task.WaitAsync(linked.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ctsTimeout.IsCancellationRequested)
@@ -213,6 +211,7 @@ public sealed class SqliteStorageEngine : IStorageEngine
         {
             health = StorageHealth.Degraded;
             degradedReason = $"Failed to open writer connection: {ex.Message}";
+            channel.Writer.TryComplete(ex);
             return;
         }
 
@@ -247,6 +246,9 @@ public sealed class SqliteStorageEngine : IStorageEngine
             {
                 using var tx = conn.BeginTransaction();
                 var flushCompletions = new List<TaskCompletionSource<bool>>();
+                var committedIntervals = 0;
+                var committedGaps = 0;
+                var committedCheckpoints = 0;
 
                 foreach (var cmd in batch)
                 {
@@ -271,17 +273,15 @@ public sealed class SqliteStorageEngine : IStorageEngine
                             ExecuteCheckpoint(conn, tx, cp.Record);
                             break;
                         case IntervalCmd iv:
-                            ExecuteInterval(conn, tx, iv.Record);
+                            committedIntervals += ExecuteInterval(conn, tx, iv.Record);
                             if (iv.Checkpoint is not null)
                             {
                                 ExecuteCheckpoint(conn, tx, iv.Checkpoint);
-                                Interlocked.Increment(ref persistedCheckpoints);
+                                committedCheckpoints++;
                             }
-                            Interlocked.Increment(ref persistedIntervals);
                             break;
                         case GapCmd gap:
-                            ExecuteInterval(conn, tx, gap.Record);
-                            Interlocked.Increment(ref persistedGaps);
+                            committedGaps += ExecuteInterval(conn, tx, gap.Record);
                             break;
                         case QuotaEventCmd qe:
                             ExecuteQuotaEvent(conn, tx, qe.Record);
@@ -293,6 +293,9 @@ public sealed class SqliteStorageEngine : IStorageEngine
                 }
 
                 tx.Commit();
+                Interlocked.Add(ref persistedIntervals, committedIntervals);
+                Interlocked.Add(ref persistedGaps, committedGaps);
+                Interlocked.Add(ref persistedCheckpoints, committedCheckpoints);
 
                 foreach (var f in flushCompletions)
                 {
@@ -427,7 +430,7 @@ public sealed class SqliteStorageEngine : IStorageEngine
         cmd.ExecuteNonQuery();
     }
 
-    private static void ExecuteInterval(SqliteConnection conn, SqliteTransaction tx, UsageIntervalRecord r)
+    private static int ExecuteInterval(SqliteConnection conn, SqliteTransaction tx, UsageIntervalRecord r)
     {
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -456,7 +459,7 @@ public sealed class SqliteStorageEngine : IStorageEngine
         cmd.Parameters.AddWithValue("@gap", r.IsGap ? 1 : 0);
         cmd.Parameters.AddWithValue("@reason", (object?)r.GapReason ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@conf", r.TimingConfidence);
-        cmd.ExecuteNonQuery();
+        return cmd.ExecuteNonQuery();
     }
 
     private static void ExecuteQuotaEvent(SqliteConnection conn, SqliteTransaction tx, QuotaThresholdEvent r)
@@ -542,7 +545,7 @@ public sealed class SqliteStorageEngine : IStorageEngine
         }
         if (startUtcMs.HasValue)
         {
-            sql += " AND end_utc_ms > @start";
+            sql += " AND (end_utc_ms > @start OR (is_gap = 1 AND start_utc_ms = end_utc_ms AND start_utc_ms >= @start))";
             cmd.Parameters.AddWithValue("@start", startUtcMs.Value);
         }
         if (endUtcMs.HasValue)
@@ -639,7 +642,9 @@ public sealed class SqliteStorageEngine : IStorageEngine
         var sql = @"
             SELECT interval_id, start_utc_ms, end_utc_ms, bytes_rx, bytes_tx, is_gap
             FROM usage_intervals
-            WHERE end_utc_ms > @rangeStart AND start_utc_ms < @rangeEnd
+            WHERE (end_utc_ms > @rangeStart OR
+                   (is_gap = 1 AND start_utc_ms = end_utc_ms AND start_utc_ms >= @rangeStart))
+              AND start_utc_ms < @rangeEnd
         ";
         cmd.Parameters.AddWithValue("@rangeStart", range.StartUtcMs);
         cmd.Parameters.AddWithValue("@rangeEnd", range.EndUtcMs);
@@ -663,6 +668,8 @@ public sealed class SqliteStorageEngine : IStorageEngine
         long missingDurationMs = 0;
         var intervalCount = 0;
         long lastEndMs = long.MinValue;
+        long lastObservedEndMs = long.MinValue;
+        long lastMissingEndMs = long.MinValue;
         var hasTemporalOverlap = false;
 
         using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -676,7 +683,7 @@ public sealed class SqliteStorageEngine : IStorageEngine
             var isGap = reader.GetInt32(5) == 1;
 
             // Invariant: Temporal overlap between intervals in the same scope stream indicates corruption
-            if (startMs < lastEndMs)
+            if (endMs > startMs && startMs < lastEndMs)
             {
                 hasTemporalOverlap = true;
             }
@@ -684,13 +691,17 @@ public sealed class SqliteStorageEngine : IStorageEngine
 
             if (isGap)
             {
-                var gapOverlap = range.OverlapDurationMs(startMs, endMs);
+                var gapOverlap = Math.Max(0L,
+                    Math.Min(range.EndUtcMs, endMs) - Math.Max(Math.Max(range.StartUtcMs, startMs), lastMissingEndMs));
                 missingDurationMs = CheckedIntegerMath.CheckedAdd(missingDurationMs, gapOverlap, "missing duration accumulation");
+                lastMissingEndMs = Math.Max(lastMissingEndMs, endMs);
             }
             else
             {
-                var validOverlap = range.OverlapDurationMs(startMs, endMs);
+                var validOverlap = Math.Max(0L,
+                    Math.Min(range.EndUtcMs, endMs) - Math.Max(Math.Max(range.StartUtcMs, startMs), lastObservedEndMs));
                 observedDurationMs = CheckedIntegerMath.CheckedAdd(observedDurationMs, validOverlap, "observed duration accumulation");
+                lastObservedEndMs = Math.Max(lastObservedEndMs, endMs);
 
                 var (allocRx, allocTx) = IntegerSplitter.Allocate(startMs, endMs, rawRx, rawTx, range.StartUtcMs, range.EndUtcMs);
                 totalRx = CheckedIntegerMath.CheckedAdd(totalRx, allocRx, "historical summary rx");
@@ -698,11 +709,24 @@ public sealed class SqliteStorageEngine : IStorageEngine
             }
         }
 
+        // A clock-change gap is an event with exact monotonic duration but no
+        // trustworthy UTC span. Detect it even when a subrange misses its point
+        // marker but intersects the old/new wall-clock anchors.
+        var hasClockDiscontinuity = await HasClockDiscontinuityAsync(range, ct).ConfigureAwait(false);
+
         // Determine completeness
         var (earliestMs, latestMs) = await GetHistoryAvailabilityAsync(ct).ConfigureAwait(false);
         CompletenessState completeness;
 
-        if (health != StorageHealth.Healthy || hasTemporalOverlap)
+        if (health != StorageHealth.Healthy)
+        {
+            completeness = CompletenessState.StorageDegraded;
+        }
+        else if (hasClockDiscontinuity)
+        {
+            completeness = CompletenessState.ClockUncertain;
+        }
+        else if (hasTemporalOverlap)
         {
             completeness = CompletenessState.StorageDegraded;
         }
@@ -754,7 +778,43 @@ public sealed class SqliteStorageEngine : IStorageEngine
             completeness,
             scopeRevisionId,
             networkProfileId,
-            IsEstimated: false);
+            IsEstimated: hasClockDiscontinuity);
+    }
+
+    private async Task<bool> HasClockDiscontinuityAsync(
+        HistoricalRange range, CancellationToken ct)
+    {
+        using var conn = CreateConnection();
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+        ConfigurePragmas(conn);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT g.start_utc_ms,
+                   (SELECT next.utc_anchor_ms
+                    FROM clock_segments AS prior
+                    JOIN clock_segments AS next ON next.session_id = prior.session_id
+                    WHERE prior.segment_id = g.clock_segment_id
+                      AND next.rowid > prior.rowid
+                    ORDER BY next.rowid
+                    LIMIT 1) AS next_utc_ms
+            FROM usage_intervals AS g
+            WHERE g.is_gap = 1 AND g.timing_confidence = 'utc_discontinuous';";
+
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var startMs = reader.GetInt64(0);
+            var endMs = reader.IsDBNull(1) ? startMs : reader.GetInt64(1);
+            var lowMs = Math.Min(startMs, endMs);
+            var highMs = Math.Max(startMs, endMs);
+            if (range.Contains(startMs) || range.Contains(endMs) ||
+                (lowMs < range.EndUtcMs && highMs > range.StartUtcMs))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     public async Task<IReadOnlyList<UsageIntervalRecord>> GetPagedIntervalsAsync(
@@ -770,7 +830,9 @@ public sealed class SqliteStorageEngine : IStorageEngine
             SELECT interval_id, source_interval_key, session_id, clock_segment_id, scope_revision_id, network_profile_id,
                    start_utc_ms, end_utc_ms, monotonic_duration_ticks, bytes_rx, bytes_tx, is_coarse, is_gap, gap_reason, timing_confidence
             FROM usage_intervals
-            WHERE end_utc_ms > @rangeStart AND start_utc_ms < @rangeEnd
+            WHERE (end_utc_ms > @rangeStart OR
+                   (is_gap = 1 AND start_utc_ms = end_utc_ms AND start_utc_ms >= @rangeStart))
+              AND start_utc_ms < @rangeEnd
         ";
         cmd.Parameters.AddWithValue("@rangeStart", range.StartUtcMs);
         cmd.Parameters.AddWithValue("@rangeEnd", range.EndUtcMs);
@@ -944,7 +1006,7 @@ public sealed class SqliteStorageEngine : IStorageEngine
         }
         catch { }
         cts.Dispose();
-        health = StorageHealth.Closed;
+        if (health == StorageHealth.Healthy) health = StorageHealth.Closed;
     }
 
     public void Dispose()

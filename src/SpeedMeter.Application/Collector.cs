@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,6 +10,9 @@ using SpeedMeter.Storage;
 namespace SpeedMeter.Application;
 
 public enum CollectorState { Starting, Running, Paused, Suspended, Degraded, Failed, Stopped }
+
+/// <summary>Result of the normal shutdown persistence barrier, retained after disposal.</summary>
+public sealed record CollectorShutdownResult(bool CleanDurable, string? FailureStage, string? Diagnostic);
 
 public sealed record CollectorSnapshot(
     long Sequence,
@@ -45,6 +49,7 @@ public sealed class Collector : IDisposable
     private string? scope;
     private string sessionId;
     private string clockSegmentId;
+    private ClockReading lastClockReading;
     private string scopeRevisionId;
     private long revisionNumber;
     private bool paused;
@@ -61,6 +66,7 @@ public sealed class Collector : IDisposable
     private bool notifying;
     private long subscriberFailures;
     private bool sessionStartedInStorage;
+    private CollectorShutdownResult? shutdownResult;
 
     public event Action<CollectorSnapshot>? Updated;
 
@@ -100,8 +106,9 @@ public sealed class Collector : IDisposable
             }
         }
 
+        lastClockReading = clock.Read();
         latest = new(0, CollectorState.Starting,
-            engine.Interrupt(clock.Read().UtcNow, ReadingState.Measuring,
+            engine.Interrupt(lastClockReading.UtcNow, ReadingState.Measuring,
                 scope is null ? "Choose an adapter to begin." : "Establishing baseline for primary adapter."),
             observation)
         {
@@ -114,6 +121,7 @@ public sealed class Collector : IDisposable
     public ScopeMode Mode { get { lock (gate) return scopeMode; } }
     public long SubscriberFailures => Interlocked.Read(ref subscriberFailures);
     public bool Paused { get { lock (gate) return paused; } }
+    public CollectorShutdownResult? ShutdownResult { get { lock (gate) return shutdownResult; } }
     public double Interval
     {
         get { lock (gate) return interval; }
@@ -186,10 +194,16 @@ public sealed class Collector : IDisposable
         {
             ThrowIfDisposed();
             if (paused) return;
-            paused = true;
             var time = clock.Read();
-            pauseStartUtc = time.UtcNow;
-            pauseStartMonotonic = time.MonotonicSeconds;
+            if (!suspended) ObserveClockTransition(time);
+            paused = true;
+            // A pause requested during sleep starts when the suspend gap ends.
+            // Otherwise two separately named gaps would cover the same span.
+            if (!suspended)
+            {
+                pauseStartUtc = time.UtcNow;
+                pauseStartMonotonic = time.MonotonicSeconds;
+            }
             PublishInterruption("Paused · this interval is not observed.");
         }
     }
@@ -203,12 +217,29 @@ public sealed class Collector : IDisposable
             paused = false;
             var time = clock.Read();
 
-            if (pauseStartUtc is not null)
+            if (suspended && pauseStartUtc is not null && pauseStartMonotonic is not null)
             {
-                PersistGapRecord(pauseStartUtc.Value, time.UtcNow, "user_paused");
+                var start = new ClockReading(pauseStartMonotonic.Value, pauseStartUtc.Value);
+                PersistGapRecord(start, time, "user_paused");
+                if (IsClockDiscontinuous(start, time)) RotateClockSegment(time);
+                pauseStartUtc = null;
+                pauseStartMonotonic = null;
+                suspendStartUtc = time.UtcNow;
+                suspendStartMonotonic = time.MonotonicSeconds;
+                lastClockReading = time;
+                PublishInterruption("System suspended · monitoring gap.");
+                return;
+            }
+
+            if (pauseStartUtc is not null && pauseStartMonotonic is not null)
+            {
+                var start = new ClockReading(pauseStartMonotonic.Value, pauseStartUtc.Value);
+                PersistGapRecord(start, time, "user_paused");
+                if (IsClockDiscontinuous(start, time)) RotateClockSegment(time);
                 pauseStartUtc = null;
                 pauseStartMonotonic = null;
             }
+            lastClockReading = time;
 
             engine.RebaselineForScopeChange(scope);
             PublishInterruption("Resuming. Establishing a new baseline.");
@@ -231,8 +262,9 @@ public sealed class Collector : IDisposable
         {
             ThrowIfDisposed();
             if (suspended == value) return;
-            suspended = value;
             var time = clock.Read();
+            if (value && !paused) ObserveClockTransition(time);
+            suspended = value;
 
             if (suspended)
             {
@@ -246,12 +278,22 @@ public sealed class Collector : IDisposable
             }
             else
             {
-                if (suspendStartUtc is not null)
+                if (suspendStartUtc is not null && suspendStartMonotonic is not null)
                 {
-                    PersistGapRecord(suspendStartUtc.Value, time.UtcNow, "system_sleep");
+                    var start = new ClockReading(suspendStartMonotonic.Value, suspendStartUtc.Value);
+                    PersistGapRecord(start, time, "system_sleep");
+                    if (IsClockDiscontinuous(start, time)) RotateClockSegment(time);
                     suspendStartUtc = null;
                     suspendStartMonotonic = null;
                 }
+
+                if (paused && pauseStartUtc is null)
+                {
+                    pauseStartUtc = time.UtcNow;
+                    pauseStartMonotonic = time.MonotonicSeconds;
+                }
+
+                if (!paused) lastClockReading = time;
 
                 if (routeProvider is not null && scopeMode == ScopeMode.AutoPrimary)
                 {
@@ -280,16 +322,19 @@ public sealed class Collector : IDisposable
         }
     }
 
-    private Task? PersistGapRecord(DateTimeOffset startUtc, DateTimeOffset endUtc, string reason)
+    private Task? PersistGapRecord(ClockReading start, ClockReading end, string reason,
+        CancellationToken ct = default, string? timingConfidence = null)
     {
         if (storage is null) return null;
-        var now = clock.Read();
-        EnsureStorageSessionInitialized(now);
+        EnsureStorageSessionInitialized(start);
 
-        var startMs = startUtc.ToUnixTimeMilliseconds();
-        var endMs = endUtc.ToUnixTimeMilliseconds();
-        if (endMs <= startMs) endMs = startMs + 1;
-        var durationTicks = checked(Math.Max(10_000L, (endMs - startMs) * 10_000L));
+        var startMs = start.UtcNow.ToUnixTimeMilliseconds();
+        var endMs = end.UtcNow.ToUnixTimeMilliseconds();
+        var durationTicks = GetMonotonicDurationTicks(start, end);
+        var discontinuous = IsClockDiscontinuous(start, end);
+        // A changed UTC mapping has no trustworthy calendar span. Persist an
+        // observed-time marker; the actual elapsed duration remains monotonic.
+        if (discontinuous || endMs <= startMs) endMs = startMs;
 
         var gap = new UsageIntervalRecord(
             Guid.NewGuid().ToString("D"),
@@ -301,10 +346,75 @@ public sealed class Collector : IDisposable
             startMs,
             endMs,
             durationTicks,
-            0, 0, false, true, reason, "nominal");
+            0, 0, false, true, reason,
+            discontinuous ? "utc_discontinuous" : timingConfidence ?? (endMs == startMs ? "utc_unresolved" : "nominal"));
 
-        return storage.IngestGapAsync(gap);
+        return storage.IngestGapAsync(gap, ct);
     }
+
+    private static long? GetMonotonicDurationTicks(ClockReading start, ClockReading end)
+    {
+        var elapsed = end.MonotonicSeconds - start.MonotonicSeconds;
+        if (!double.IsFinite(elapsed) || elapsed < 0 || elapsed >= (double)long.MaxValue / 10_000_000)
+            return null;
+        return (long)Math.Round(elapsed * 10_000_000, MidpointRounding.AwayFromZero);
+    }
+
+    private static bool IsClockDiscontinuous(ClockReading start, ClockReading end)
+    {
+        var elapsed = end.MonotonicSeconds - start.MonotonicSeconds;
+        if (!double.IsFinite(elapsed) || elapsed < 0) return true;
+        return Math.Abs((end.UtcNow - start.UtcNow).TotalSeconds - elapsed) > 2.0;
+    }
+
+    private static bool HasMissedSuspend(ClockReading start, ClockReading end)
+    {
+        if (start.AwakeSeconds is null || end.AwakeSeconds is null) return false;
+        var elapsed = end.MonotonicSeconds - start.MonotonicSeconds;
+        var awake = end.AwakeSeconds.Value - start.AwakeSeconds.Value;
+        return double.IsFinite(elapsed) && double.IsFinite(awake) &&
+            elapsed >= 0 && awake >= 0 && elapsed - awake > 1.0;
+    }
+
+    private void ObserveClockTransition(ClockReading time)
+    {
+        if (HasMissedSuspend(lastClockReading, time))
+        {
+            PersistGapRecord(lastClockReading, time, "system_sleep",
+                timingConfidence: "inferred_sleep");
+            if (IsClockDiscontinuous(lastClockReading, time)) RotateClockSegment(time);
+            engine.Interrupt(time.UtcNow, ReadingState.Discontinuity,
+                "Unobserved system sleep inferred. Establishing a new measurement baseline.", time.MonotonicSeconds);
+        }
+        else if (IsClockDiscontinuous(lastClockReading, time))
+        {
+            PersistGapRecord(lastClockReading, time, "wall_clock_change");
+            RotateClockSegment(time);
+            engine.Interrupt(time.UtcNow, ReadingState.Discontinuity,
+                "Wall clock changed. Establishing a new measurement baseline.", time.MonotonicSeconds);
+        }
+        lastClockReading = time;
+    }
+
+    private Task? RotateClockSegment(ClockReading time, CancellationToken ct = default)
+    {
+        if (storage is not null)
+        {
+            EnsureStorageSessionInitialized(lastClockReading);
+        }
+        clockSegmentId = Guid.NewGuid().ToString("D");
+        if (storage is null) return null;
+        var segment = new ClockSegmentRecord(
+            clockSegmentId, sessionId, MonotonicAnchorTicks(time.MonotonicSeconds),
+            time.UtcNow.ToUnixTimeMilliseconds(), 10_000_000,
+            "uncertain", "wall_clock_change");
+        return storage.RecordClockSegmentAsync(segment, ct);
+    }
+
+    private static long MonotonicAnchorTicks(double seconds) =>
+        double.IsFinite(seconds) && seconds >= 0 && seconds < (double)long.MaxValue / 10_000_000
+            ? (long)(seconds * 10_000_000)
+            : 0;
 
     private CollectorSnapshot PublishInterruption(string runningDetail)
     {
@@ -323,6 +433,22 @@ public sealed class Collector : IDisposable
             if (paused || suspended) return latest;
 
             var time = clock.Read();
+            if (!double.IsFinite(time.MonotonicSeconds) || time.MonotonicSeconds < 0)
+            {
+                lastClockReading = time;
+                return Publish(CollectorState.Degraded,
+                    engine.Interrupt(time.UtcNow, ReadingState.Discontinuity,
+                        "Invalid sampling clock; waiting for a new baseline.", time.MonotonicSeconds));
+            }
+            if (!double.IsFinite(lastClockReading.MonotonicSeconds) || lastClockReading.MonotonicSeconds < 0)
+                lastClockReading = time;
+            var missedSuspend = HasMissedSuspend(lastClockReading, time);
+            var clockInterrupted = missedSuspend || IsClockDiscontinuous(lastClockReading, time);
+            if (clockInterrupted)
+            {
+                ObserveClockTransition(time);
+            }
+            else lastClockReading = time;
 
             // AutoPrimary dynamic route evaluation with flapping stabilization
             if (routeProvider is not null && scopeMode == ScopeMode.AutoPrimary)
@@ -363,6 +489,16 @@ public sealed class Collector : IDisposable
             {
                 var adapter = observation.Adapters.FirstOrDefault(a => a.Id == scope);
                 var reading = engine.Sample(adapter, time.MonotonicSeconds, time.UtcNow, interval);
+                if (clockInterrupted && reading.State == ReadingState.Measuring)
+                {
+                    reading = reading with
+                    {
+                        State = ReadingState.Discontinuity,
+                        Detail = missedSuspend
+                            ? "Unobserved system sleep inferred. New counter baseline captured."
+                            : "Wall clock changed. New counter baseline captured."
+                    };
+                }
 
                 // Persist valid interval and checkpoint if storage is attached
                 if (storage is not null && reading.State == ReadingState.Live && reading.IntervalBytesRx.HasValue && reading.IntervalBytesTx.HasValue)
@@ -377,6 +513,7 @@ public sealed class Collector : IDisposable
                         ? CollectorState.Degraded
                         : CollectorState.Running,
                     ReadingState.Measuring => CollectorState.Starting,
+                    ReadingState.Discontinuity when clockInterrupted => CollectorState.Starting,
                     _ => CollectorState.Degraded
                 };
 
@@ -541,7 +678,7 @@ public sealed class Collector : IDisposable
         var segmentRec = new ClockSegmentRecord(
             clockSegmentId,
             sessionId,
-            (long)(time.MonotonicSeconds * 10_000_000),
+            MonotonicAnchorTicks(time.MonotonicSeconds),
             startMs,
             10_000_000,
             "nominal",
@@ -612,6 +749,7 @@ public sealed class Collector : IDisposable
     public void Dispose()
     {
         Task? pending;
+        CollectorShutdownResult? failedShutdown = null;
         lock (gate)
         {
             if (disposed) return;
@@ -623,28 +761,75 @@ public sealed class Collector : IDisposable
 
             if (storage is not null)
             {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                var token = deadline.Token;
+                var stage = "initialize";
                 try
                 {
+                    EnsureStorageSessionInitialized(now);
                     if (paused && pauseStartUtc is not null)
                     {
-                        var task = PersistGapRecord(pauseStartUtc.Value, now.UtcNow, "user_paused");
+                        stage = "gap";
+                        var start = new ClockReading(pauseStartMonotonic ?? now.MonotonicSeconds, pauseStartUtc.Value);
+                        var task = PersistGapRecord(start, now, "user_paused", token);
+                        task?.WaitAsync(token).GetAwaiter().GetResult();
+                        if (IsClockDiscontinuous(start, now))
+                        {
+                            stage = "clock_segment";
+                            RotateClockSegment(now, token)?.WaitAsync(token).GetAwaiter().GetResult();
+                        }
                         pauseStartUtc = null;
-                        task?.GetAwaiter().GetResult();
                     }
                     else if (suspended && suspendStartUtc is not null)
                     {
-                        var task = PersistGapRecord(suspendStartUtc.Value, now.UtcNow, "system_sleep");
+                        stage = "gap";
+                        var start = new ClockReading(suspendStartMonotonic ?? now.MonotonicSeconds, suspendStartUtc.Value);
+                        var task = PersistGapRecord(start, now, "system_sleep", token);
+                        task?.WaitAsync(token).GetAwaiter().GetResult();
+                        if (IsClockDiscontinuous(start, now))
+                        {
+                            stage = "clock_segment";
+                            RotateClockSegment(now, token)?.WaitAsync(token).GetAwaiter().GetResult();
+                        }
                         suspendStartUtc = null;
-                        task?.GetAwaiter().GetResult();
                     }
 
-                    storage.RecordSessionEndAsync(sessionId, now.UtcNow, true, "normal_shutdown").GetAwaiter().GetResult();
-                    storage.FlushAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+                    // Queue admission is not durability. Confirm the gap and all
+                    // earlier records before marking the session clean.
+                    stage = "gap_flush";
+                    storage.FlushAsync(TimeSpan.FromSeconds(2), token).WaitAsync(token).GetAwaiter().GetResult();
+                    if (storage.Status.Health != StorageHealth.Healthy)
+                        throw new InvalidOperationException(storage.Status.DegradedReason ?? "Storage is not healthy.");
+
+                    stage = "session_end";
+                    storage.RecordSessionEndAsync(sessionId, now.UtcNow, true, "normal_shutdown", token)
+                        .WaitAsync(token).GetAwaiter().GetResult();
+
+                    stage = "final_flush";
+                    storage.FlushAsync(TimeSpan.FromSeconds(2), token).WaitAsync(token).GetAwaiter().GetResult();
+                    if (storage.Status.Health != StorageHealth.Healthy)
+                        throw new InvalidOperationException(storage.Status.DegradedReason ?? "Storage is not healthy.");
+
+                    shutdownResult = new CollectorShutdownResult(true, null, null);
                 }
-                catch { }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    var message = ex is OperationCanceledException
+                        ? "Shutdown persistence deadline exceeded."
+                        : ex.Message;
+                    failedShutdown = new CollectorShutdownResult(false, stage, message);
+                    shutdownResult = failedShutdown;
+                }
+            }
+            else
+            {
+                shutdownResult = new CollectorShutdownResult(false, "no_storage", "No storage engine was attached.");
             }
         }
-        pending?.GetAwaiter().GetResult();
-        cancellation.Dispose();
+        if (failedShutdown is not null)
+            Trace.TraceError("Collector shutdown persistence failed at {0}: {1}",
+                failedShutdown.FailureStage, failedShutdown.Diagnostic);
+        try { pending?.GetAwaiter().GetResult(); }
+        finally { cancellation.Dispose(); }
     }
 }

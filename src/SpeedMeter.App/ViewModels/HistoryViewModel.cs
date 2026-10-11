@@ -134,7 +134,9 @@ public sealed class HistoryViewModel : ViewModelBase
             TxBytesText = MetricFormat.Bytes(summary.BytesTx);
             CoverageRatio = summary.CoverageRatio;
             Completeness = summary.Completeness;
-            CoverageText = $"{summary.CoverageRatio * 100:F1}% · {summary.Completeness}";
+            CoverageText = summary.Completeness == CompletenessState.ClockUncertain
+                ? "Clock changed · coverage uncertain"
+                : $"{summary.CoverageRatio * 100:F1}% · {summary.Completeness}";
 
             var sum = summary.TotalBytes;
             if (sum > 0)

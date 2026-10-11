@@ -60,7 +60,9 @@ public enum CompletenessState
     /// <summary>Requested range is outside available monitoring history boundary.</summary>
     Unavailable,
     /// <summary>Storage was degraded during query or persistence.</summary>
-    StorageDegraded
+    StorageDegraded,
+    /// <summary>A wall-clock discontinuity prevents a trustworthy UTC coverage percentage.</summary>
+    ClockUncertain
 }
 
 /// <summary>
