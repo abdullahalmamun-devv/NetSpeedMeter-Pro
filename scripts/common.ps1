@@ -10,6 +10,10 @@ $env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = 'false'
 $env:NUGET_PACKAGES = Join-Path $projectRoot '.tools\packages'
 $env:DOTNET_CLI_HOME = Join-Path $projectRoot '.tools\cli-home'
 $env:DOTNET_ROOT = Split-Path -Parent $dotnetPath
+try {
+    $currentSha = (git rev-parse HEAD 2>$null)
+    if ($currentSha) { $env:SourceRevisionId = $currentSha.Trim() }
+} catch { }
 Set-Location -LiteralPath $projectRoot
 function Restore-Project([string]$target) {
     & $dotnetPath restore $target --configfile (Join-Path $projectRoot 'NuGet.Config') --nologo

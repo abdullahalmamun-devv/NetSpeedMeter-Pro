@@ -137,16 +137,50 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
             snapshot.Sequence);
     }
 
+    public Action<string>? DiagnosticLogger { get; set; }
+
     public void Dispose()
+    {
+        DisposeWithTimeout(TimeSpan.FromSeconds(3.0));
+    }
+
+    public void DisposeWithTimeout(TimeSpan timeout)
     {
         if (disposed) return;
         disposed = true;
 
+        var deadline = DateTimeOffset.UtcNow + timeout;
         settingsService.SettingsChanged -= OnSettingsChanged;
         collector.Updated -= OnCollectorUpdated;
-        connectivityService.Dispose();
-        collector.Dispose();
-        storage.Dispose();
+
+        try { connectivityService.Dispose(); } catch { }
+
+        // 1. Collector disposal within time budget
+        var remainingForCollector = deadline - DateTimeOffset.UtcNow;
+        if (remainingForCollector > TimeSpan.Zero)
+        {
+            try { collector.Dispose(); } catch { }
+        }
+
+        // 2. Storage disposal bounded by remaining whole-application budget
+        var remainingForStorage = deadline - DateTimeOffset.UtcNow;
+        if (remainingForStorage > TimeSpan.FromMilliseconds(50))
+        {
+            var storageTask = Task.Run(() =>
+            {
+                try { storage.Dispose(); } catch { }
+            });
+
+            var completed = storageTask.Wait(remainingForStorage);
+            if (!completed)
+            {
+                DiagnosticLogger?.Invoke("Whole-application shutdown barrier exceeded timeout; storage flush did not complete within budget.");
+            }
+        }
+        else
+        {
+            DiagnosticLogger?.Invoke("Whole-application shutdown barrier expired before storage disposal.");
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -156,8 +190,8 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
 
         settingsService.SettingsChanged -= OnSettingsChanged;
         collector.Updated -= OnCollectorUpdated;
-        connectivityService.Dispose();
-        collector.Dispose();
-        await storage.DisposeAsync().ConfigureAwait(false);
+        try { connectivityService.Dispose(); } catch { }
+        try { collector.Dispose(); } catch { }
+        try { await storage.DisposeAsync().ConfigureAwait(false); } catch { }
     }
 }

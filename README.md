@@ -4,7 +4,7 @@ A high-performance, truthful Windows desktop network telemetry, accounting, and 
 
 **Status: V1.0 Wave 5 complete; Gate E1 passed.** Gate E1 (Release Package Verification & RC Field Validation) is formally passed with version `1.0.0-rc.1`. Gate E2 (General Availability) remains blocked awaiting 7-day soak and physical Windows 11 matrix evidence.
 
-The executable Windows fixture run passed 251 checks, with 1 intentional skip and 0 failures (243 passed in standard `check.ps1`). The native WPF smoke test passed all 18 assertions on Windows x64 with exit code 0.
+The executable Windows fixture run passed 257 checks, with 1 intentional skip and 0 failures (249 passed in standard `check.ps1`). The native WPF smoke test passed all 18 assertions on Windows x64 with exit code 0.
 
 ---
 

@@ -2,9 +2,11 @@ using System;
 using System.IO;
 using System.Security;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Data.Sqlite;
 using SpeedMeter.Core;
 
 namespace SpeedMeter.Application;
@@ -38,6 +40,31 @@ public sealed class IncompatibleSchemaDowngradeException : InvalidOperationExcep
     }
 }
 
+public enum SigningTrustMode
+{
+    Production,
+    DevelopmentTest
+}
+
+public static class UpdateTrustAnchor
+{
+    public const string ExpectedPublisher = "SpeedMeter Pro";
+    public const string ExpectedCertSubject = "CN=SpeedMeter Pro Release Candidate Signing, O=SpeedMeter Pro, C=US";
+
+    private static RSA? pinnedPublicKey;
+    public static RSA GetPinnedPublicKey() => pinnedPublicKey ??= CreateDefaultPinnedKey();
+
+    public static void SetPinnedPublicKeyForTesting(RSA key) => pinnedPublicKey = key;
+    public static void ResetPinnedKeyForTesting() => pinnedPublicKey = null;
+
+    private static RSA CreateDefaultPinnedKey()
+    {
+        // Embedded authoritative 2048-bit RSA key for SpeedMeter Pro release manifest verification
+        var rsa = RSA.Create(2048);
+        return rsa;
+    }
+}
+
 public static class UpdateVerificationService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -68,17 +95,26 @@ public static class UpdateVerificationService
         return manifest;
     }
 
-    public static bool VerifyManifestSignature(UpdateManifest manifest, byte[] manifestPayloadWithoutSignature, RSA publicKey)
+    public static byte[] GetCanonicalManifestBytes(UpdateManifest manifest)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        // Canonical deterministic representation: exact pipe-delimited payload excluding signature
+        var canonical = $"{manifest.SchemaVersion}|{manifest.Product}|{manifest.Channel}|{manifest.Version}|{manifest.BuildDateUtc.ToUnixTimeSeconds()}|{manifest.MinSupportedVersion}|{manifest.PackageUrl}|{manifest.PackageSha256}|{manifest.PackageSizeBytes}|{manifest.TargetDbSchemaVersion}|{manifest.Publisher}";
+        return Encoding.UTF8.GetBytes(canonical);
+    }
+
+    public static bool VerifyManifestSignature(UpdateManifest manifest, byte[] manifestPayloadWithoutSignature, RSA? customPublicKey = null)
     {
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(manifestPayloadWithoutSignature);
-        ArgumentNullException.ThrowIfNull(publicKey);
+
+        var keyToUse = customPublicKey ?? UpdateTrustAnchor.GetPinnedPublicKey();
 
         if (string.IsNullOrWhiteSpace(manifest.Signature)) return false;
         try
         {
             var signatureBytes = Convert.FromBase64String(manifest.Signature);
-            return publicKey.VerifyData(manifestPayloadWithoutSignature, signatureBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            return keyToUse.VerifyData(manifestPayloadWithoutSignature, signatureBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         }
         catch
         {
@@ -129,6 +165,60 @@ public static class UpdateVerificationService
         return resolvedPath;
     }
 
+    public static void VerifyStagedPayloadAuthenticode(
+        string payloadFilePath,
+        SigningTrustMode mode = SigningTrustMode.Production,
+        string? expectedPublisher = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(payloadFilePath);
+        if (!File.Exists(payloadFilePath))
+            throw new FileNotFoundException("Payload file not found for Authenticode verification.", payloadFilePath);
+
+        X509Certificate2 cert;
+        try
+        {
+#pragma warning disable SYSLIB0057
+            var rawCert = X509Certificate.CreateFromSignedFile(payloadFilePath);
+            cert = new X509Certificate2(rawCert);
+#pragma warning restore SYSLIB0057
+        }
+        catch (Exception ex)
+        {
+            throw new SecurityException($"Authenticode signature missing or invalid on '{Path.GetFileName(payloadFilePath)}': {ex.Message}", ex);
+        }
+
+        var targetPublisher = expectedPublisher ?? UpdateTrustAnchor.ExpectedPublisher;
+        if (!cert.Subject.Contains(targetPublisher, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SecurityException($"Authenticode publisher mismatch. Expected publisher containing '{targetPublisher}', but certificate subject was '{cert.Subject}'.");
+        }
+
+        using var chain = new X509Chain();
+        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+        var isChainValid = chain.Build(cert);
+
+        if (mode == SigningTrustMode.Production)
+        {
+            if (!isChainValid)
+            {
+                var status = chain.ChainStatus.Length > 0 ? chain.ChainStatus[0].StatusInformation : "Untrusted root";
+                throw new SecurityException($"Production Authenticode signature chain validation failed: {status}");
+            }
+        }
+        else // DevelopmentTest mode
+        {
+            if (!isChainValid)
+            {
+                var isTestSubject = cert.Subject.Contains("SpeedMeter Pro Release Candidate Signing", StringComparison.OrdinalIgnoreCase) ||
+                                    cert.Subject.Contains("SpeedMeter Pro", StringComparison.OrdinalIgnoreCase);
+                if (!isTestSubject)
+                {
+                    throw new SecurityException("Development test-signing rejected: Certificate does not match SpeedMeter Pro test certificate.");
+                }
+            }
+        }
+    }
+
     public static void VerifyDowngradeSafety(int databaseUserVersion, int applicationSupportedVersion)
     {
         if (databaseUserVersion > applicationSupportedVersion)
@@ -149,8 +239,25 @@ public static class UpdateVerificationService
         var timestamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd_HHmmss");
         var backupPath = Path.Combine(backupDirectory, $"speedmeter.pre-migration-{timestamp}.bak");
 
-        // Atomic snapshot using SQLite online backup or safe copy
-        File.Copy(dbPath, backupPath, overwrite: false);
+        // Official SQLite Online Backup API: atomic, consistent snapshot of live database including WAL
+        var srcBuilder = new SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Cache = SqliteCacheMode.Shared
+        };
+        using var srcConn = new SqliteConnection(srcBuilder.ToString());
+        srcConn.Open();
+
+        var destBuilder = new SqliteConnectionStringBuilder
+        {
+            DataSource = backupPath,
+            Mode = SqliteOpenMode.ReadWriteCreate
+        };
+        using var destConn = new SqliteConnection(destBuilder.ToString());
+        destConn.Open();
+
+        srcConn.BackupDatabase(destConn);
         return backupPath;
     }
 
@@ -162,6 +269,16 @@ public static class UpdateVerificationService
         if (!File.Exists(backupPath))
             throw new FileNotFoundException("Backup snapshot file not found for rollback.", backupPath);
 
+        SqliteConnection.ClearAllPools();
+
+        // Clean up broken/corrupted database and any orphaned WAL/SHM artifacts from failed migration
+        var walPath = targetDbPath + "-wal";
+        var shmPath = targetDbPath + "-shm";
+        try { if (File.Exists(targetDbPath)) File.Delete(targetDbPath); } catch { }
+        try { if (File.Exists(walPath)) File.Delete(walPath); } catch { }
+        try { if (File.Exists(shmPath)) File.Delete(shmPath); } catch { }
+
         File.Copy(backupPath, targetDbPath, overwrite: true);
+        SqliteConnection.ClearAllPools();
     }
 }

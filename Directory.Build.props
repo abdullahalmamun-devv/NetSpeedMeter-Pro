@@ -8,10 +8,20 @@
     <Version>1.0.0-rc.1</Version>
     <FileVersion>1.0.0.1</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <InformationalVersion>1.0.0-rc.1+4a1c4f727dc9c0bb35bfe041df248955ab574b5b</InformationalVersion>
     <Company>SpeedMeter Pro Project</Company>
     <Product>SpeedMeter Pro</Product>
     <Copyright>Copyright © 2026 SpeedMeter Pro Project</Copyright>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
+
+  <!-- Automatically derive SourceRevisionId from Git HEAD if not explicitly provided -->
+  <Target Name="DeriveSourceRevisionIdFromGit" BeforeTargets="GetAssemblyVersion;InitializeSourceControlInformation" Condition="'$(SourceRevisionId)' == ''">
+    <Exec Command="git rev-parse HEAD" ConsoleToMSBuild="true" StandardOutputImportance="low" IgnoreExitCode="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitCommitSha" />
+    </Exec>
+    <PropertyGroup Condition="'$(GitCommitSha)' != ''">
+      <SourceRevisionId>$(GitCommitSha.Trim())</SourceRevisionId>
+      <InformationalVersion>$(Version)+$(GitCommitSha.Trim())</InformationalVersion>
+    </PropertyGroup>
+  </Target>
 </Project>

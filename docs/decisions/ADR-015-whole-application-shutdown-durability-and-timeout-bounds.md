@@ -57,9 +57,10 @@ Measurements conducted under standard and degraded workloads:
    - Does **NOT** display a modal dialog or interactive prompt that would stall Windows logoff or unattended machine reboot.
    - Upon next startup, the database detects an unclean shutdown session gap and accurately reconstructs the discontinuity per Gate A/C/D rules.
 4. **Single-Instance Clean Release:** The per-user mutex and ownership lock file (`speedmeter.owner.<UserSID>.lock`) are guaranteed to release during `OnExit()`, preventing secondary instances from being locked out on subsequent launch.
+5. **OS & Installer Graceful Shutdown Integration:** SpeedMeter Pro registers a listener for `SystemEvents.SessionEnding` / `Application.SessionEnding` and coordinates with installers via the named event `Local\SpeedMeterPro.Shutdown.<UserSid>`. This triggers clean shutdown via `ApplicationContext.DisposeWithTimeout(TimeSpan.FromSeconds(3.0))` ensuring zero data corruption during OS logoff or application upgrades.
 
 ## Decision
-Adopt the 3.0-second whole-application shutdown bound and non-blocking diagnostic logging architecture as canonical release behavior.
+Adopt the 3.0-second whole-application shutdown bound (`DisposeWithTimeout`), user SID-scoped installer shutdown event listener, and non-blocking diagnostic logging architecture as canonical release behavior.
 
 ## Consequences
 - Windows reboot and user logoff will never hang waiting for SpeedMeter Pro.

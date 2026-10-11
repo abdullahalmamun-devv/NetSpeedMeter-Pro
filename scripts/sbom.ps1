@@ -13,9 +13,11 @@ if (-not (Test-Path -LiteralPath $releaseDir)) {
     New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
 }
 
-$spdxJsonPath = Join-Path $releaseDir 'sbom.spdx.json'
+$spdxJsonPath = Join-Path $releaseDir "SpeedMeterPro-$Version-sbom.spdx.json"
+$legacySpdxJsonPath = Join-Path $releaseDir 'sbom.spdx.json'
 $noticesRootPath = Join-Path $projectRoot 'THIRD-PARTY-NOTICES.md'
-$noticesReleasePath = Join-Path $releaseDir 'THIRD-PARTY-NOTICES.md'
+$noticesReleasePath = Join-Path $releaseDir "SpeedMeterPro-$Version-THIRD-PARTY-NOTICES.txt"
+$legacyNoticesReleasePath = Join-Path $releaseDir 'THIRD-PARTY-NOTICES.md'
 
 $creationDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
@@ -182,9 +184,10 @@ $spdxDoc = [ordered]@{
 
 $jsonOutput = $spdxDoc | ConvertTo-Json -Depth 10
 [System.IO.File]::WriteAllText($spdxJsonPath, $jsonOutput, [System.Text.Encoding]::UTF8)
+[System.IO.File]::WriteAllText($legacySpdxJsonPath, $jsonOutput, [System.Text.Encoding]::UTF8)
 Write-Host "SPDX 2.3 SBOM generated at: $spdxJsonPath" -ForegroundColor Green
 
-# 2. Generate THIRD-PARTY-NOTICES.md
+# 2. Generate THIRD-PARTY-NOTICES
 $sb = [System.Text.StringBuilder]::new()
 [void]$sb.AppendLine("# Third-Party Software Notices and Information")
 [void]$sb.AppendLine()
@@ -212,4 +215,5 @@ foreach ($dep in $dependencies) {
 $noticesContent = $sb.ToString()
 [System.IO.File]::WriteAllText($noticesRootPath, $noticesContent, [System.Text.Encoding]::UTF8)
 [System.IO.File]::WriteAllText($noticesReleasePath, $noticesContent, [System.Text.Encoding]::UTF8)
-Write-Host "Third-Party Notices generated at: $noticesRootPath and $noticesReleasePath" -ForegroundColor Green
+[System.IO.File]::WriteAllText($legacyNoticesReleasePath, $noticesContent, [System.Text.Encoding]::UTF8)
+Write-Host "Third-Party Notices generated at: $noticesReleasePath" -ForegroundColor Green

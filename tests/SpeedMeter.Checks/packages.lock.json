@@ -78,6 +78,12 @@
         "dependencies": {
           "SpeedMeter.Core": "[1.0.0-rc.1, )"
         }
+      },
+      "SpeedMeterPro-Setup": {
+        "type": "Project",
+        "dependencies": {
+          "SpeedMeter.Core": "[1.0.0-rc.1, )"
+        }
       }
     }
   }

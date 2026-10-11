@@ -751,7 +751,7 @@ public partial class MainWindow : Window
 
     private void QuitClick(object sender, RoutedEventArgs e) => Quit();
 
-    private void Quit()
+    internal void Quit()
     {
         quitting = true;
         displayTimer.Stop();

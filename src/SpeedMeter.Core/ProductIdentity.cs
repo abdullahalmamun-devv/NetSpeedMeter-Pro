@@ -1,3 +1,6 @@
+using System;
+using System.Reflection;
+
 namespace SpeedMeter.Core;
 
 public static class ProductIdentity
@@ -10,7 +13,31 @@ public static class ProductIdentity
     public const string Company = "SpeedMeter Pro Project";
     public const string Copyright = "Copyright © 2026 SpeedMeter Pro Project";
     public const int DatabaseSchemaVersion = 3;
-    public const string CommitSha = "4a1c4f727dc9c0bb35bfe041df248955ab574b5b";
-    public const string InformationalVersion = ProductVersion + "+" + CommitSha;
     public const string TargetArchitecture = "win-x64";
+
+    private static readonly Lazy<string> ResolvedCommitSha = new(ResolveCommitSha);
+    private static readonly Lazy<string> ResolvedInformationalVersion = new(ResolveInformationalVersion);
+
+    public static string CommitSha => ResolvedCommitSha.Value;
+    public static string InformationalVersion => ResolvedInformationalVersion.Value;
+
+    private static string ResolveInformationalVersion()
+    {
+        var attr = typeof(ProductIdentity).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+        return attr?.InformationalVersion ?? $"{ProductVersion}+{CommitSha}";
+    }
+
+    private static string ResolveCommitSha()
+    {
+        var attr = typeof(ProductIdentity).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+        if (attr is not null && !string.IsNullOrWhiteSpace(attr.InformationalVersion))
+        {
+            var parts = attr.InformationalVersion.Split('+');
+            if (parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]))
+            {
+                return parts[1].Trim();
+            }
+        }
+        return "unspecified";
+    }
 }

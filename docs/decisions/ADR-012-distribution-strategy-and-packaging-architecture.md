@@ -65,19 +65,24 @@ SpeedMeter Pro is a feature-complete Windows desktop application engineered stri
   - Single-instance lock file semantics become unpredictable across multiple extracted folder copies.
 
 ## Decision
-1. **Primary V1 Distribution:** Adopt **Option A: Signed Per-User Windows x64 Installer**.
+1. **Primary V1 Distribution:** Adopt **Option A: Signed Per-User Windows x64 Standalone Installer (`SpeedMeterPro-1.0.0-rc.1-Setup.exe`)**.
    - Destination: `%LocalAppData%\Programs\SpeedMeterPro\`
    - Data Directory: `%LocalAppData%\SpeedMeterPro\`
    - Privilege: Standard user (`asInvoker`), 0 administrative prompts.
    - Start Menu shortcut: `%AppData%\Microsoft\Windows\Start Menu\Programs\SpeedMeter Pro.lnk`
    - Uninstall Registration: `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\SpeedMeterPro`
-2. **Portable Policy:** **Portable build is NOT offered in V1.** Per project rules, shipping an undertested archive without verified update, startup, and uninstall guarantees is prohibited.
+   - Transactional Staging: Extracts payload to `.staging_<guid>`, creates `.backup_<guid>` for existing files on upgrade, and rolls back atomically on failure.
+   - Graceful Shutdown Handshake: Two-step handshake via `Local\SpeedMeterPro.Shutdown.<UserSid>` and `WM_CLOSE`, bounded by a 5-second deadline. Exits cleanly with code 1618 if running process cannot exit; zero ungraceful `Stop-Process -Force`.
+2. **Secondary Distribution Formats:**
+   - Portable self-contained archive: `SpeedMeterPro-1.0.0-rc.1-win-x64.zip`
+   - Framework-dependent archive: `SpeedMeterPro-1.0.0-rc.1-win-x64-fdd.zip`
 3. **Uninstall Policy:** Provide two explicit uninstallation modes:
    - **Mode 1 (Default): Remove application only:** Removes binaries, Start Menu shortcuts, and registry keys. Preserves `%LocalAppData%\SpeedMeterPro\` so historical network usage and settings survive reinstallations.
-   - **Mode 2: Remove application and all local data:** Prompts user explicitly and removes all binaries, shortcuts, registry keys, and the entire `%LocalAppData%\SpeedMeterPro\` directory.
+   - **Mode 2: Remove application and all local data (`-PurgeUserData`):** Prompts user explicitly and removes all binaries, shortcuts, registry keys, and the entire `%LocalAppData%\SpeedMeterPro\` directory.
 4. **Future Store Lane:** Packaging configuration is kept modular so an MSIX package for the Microsoft Store can be produced from the same publish output without modifying application architecture.
 
 ## Consequences
 - No administrative privileges are required to install, use, update, or uninstall SpeedMeter Pro.
 - Database and lockfile ownership remain deterministic and transparent under `%LocalAppData%\SpeedMeterPro\`.
 - All native Win32 platform capabilities (WLAN BSSID queries, IP Helper, NLM COM, system tray, PerMonitorV2 placement) function without filesystem or virtualization restrictions.
+- Zero risk of SQLite WAL or settings corruption during setup/upgrade due to elimination of forced termination.

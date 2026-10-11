@@ -1,13 +1,13 @@
 # Implementation status
 
 **Current release:** 1.0.0-rc.1 (Release Candidate 1); GA release blocked pending physical hardware soak and Windows 11 matrix.  
-**Current milestone:** V1.0 Wave 5 complete; Gate E1 passed. Release packages, Authenticode signing, update trust pipeline, pre-migration snapshots, bounded logging, and SBOM generated. Gate E2 GA blocked awaiting physical soak and live Windows 11 matrix evidence.
+**Current milestone:** V1.0 Wave 5 complete; Gate E1 passed. Dynamic commit SHA model, standalone canonical Setup.exe with transactional staging and graceful shutdown handshake, dual trust Authenticode signing, update trust pipeline, live WAL SQLite pre-migration backup via `SqliteConnection.BackupDatabase`, bounded 3.0s shutdown, bounded logging, and SBOM generated. Gate E2 GA blocked awaiting physical soak and live Windows 11 matrix evidence.
 **Updated:** 12 October 2026 (Asia/Dhaka).
 
 ## Build / test status
 
-- **Build:** Succeeded with 0 warnings, 0 errors across 6 projects (`Core`, `Windows`, `Storage`, `Application`, `App`, `Checks`) using .NET 10 SDK 10.0.401.
-- **Fixtures:** 243 passed, 1 intentional skip, 0 failed via `scripts/check.ps1`; 251 passed, 1 skip, 0 failed via `scripts/check.ps1 -Windows`. Total evaluated: 252. Groups include:
+- **Build:** Succeeded with 0 warnings, 0 errors across 7 projects (`Core`, `Windows`, `Storage`, `Application`, `App`, `Installer`, `Checks`) using .NET 10 SDK 10.0.401.
+- **Fixtures:** 249 passed, 1 intentional skip, 0 failed via `scripts/check.ps1`; 257 passed, 1 skip, 0 failed via `scripts/check.ps1 -Windows`. Total evaluated: 258. Groups include:
   - 14 baseline arithmetic and boundary checks
   - 21 epoch, large counter, and delta discontinuity fixtures (including mandatory 125 MB / 10s = 12.5 MB/s and 100 Mbps)
   - 7 application collector lifecycle and resilience fixtures
@@ -22,14 +22,15 @@
   - 21 V1 Wave 3 & Gate C closure fixtures in `V1Wave3Fixtures.cs`
   - 14 V1 Core Truth closure fixtures in `V1CoreTruthFixtures.cs`
   - 14 adversarial clock and shutdown fixtures in `V1ClockShutdownFixtures.cs`
-  - 11 connectivity and reachability fixtures in `ConnectivityFixtures.cs` (AC-C01–C07: blocked ICMP with HTTPS, 3-round fail / 2-round recovery hysteresis, captive portal sign-in detection, sleep closure, metered suppression, proxy authentication, stale expiry, scope change cancellation, bounded concurrency)
-  - 11 alert engine fixtures in `AlertFixtures.cs` (AC-N01–N07: local disconnect debounce, reachability multi-check evidence, high ping 30s mean, stale/paused suppression, restart deduplication, cooldown, quiet hours popup suppression, rule revision stability, quota event single consumption, disabled probe safety)
-  - 21 network tools, privacy, and V1-Must closure fixtures in `NetworkToolsFixtures.cs` (AC-D01–D07: host normalization/anti-injection, A/AAAA DNS resolution, ping RTT min/max/mean without NaN, ping default 10 attempts per PRD contract, public IP disclosure requirement, HTTPS provider verification, egress NAT caveat, truthful link speed labeling, zero-traffic privacy invariant, native Windows WLAN API (wlanapi.dll) metadata correlation by adapter GUID and connected BSSID matching without ordering assumptions or frequency borrowing, NLM COM friendly profile name query, authentic storage migration v2->v3 fidelity, transaction-safe history pruning/clearing, single-instance per-user SID mutex and lockfile ownership with clean exit code 0, low-resource UI throttling)
-  - 7 configuration export/import fixtures in `ConfigExportImportFixtures.cs` (AC-U09, AC-S09: atomic file export, round-trip fidelity, malformed rejection, future schema rejection, rule validation, privacy preservation invariant)
-  - 10 Wave 5 release engineering and update trust fixtures in `V1Wave5ReleaseFixtures.cs` (W5-REL: canonical version identity, manifest parsing/validation, tampered manifest RSA signature rejection, single-byte tampered payload SHA-256 rejection, staging path traversal prevention, pre-migration SQLite snapshot creation and rollback recovery drill with 100% data fidelity, incompatible schema downgrade prevention, bounded operational log rotation with IPv4/MAC/user path redaction, diagnostic bundle sanitized export with live redaction preview, zero-external-network update privacy invariant)
+  - 11 connectivity and reachability fixtures in `ConnectivityFixtures.cs`
+  - 11 alert engine fixtures in `AlertFixtures.cs`
+  - 21 network tools, privacy, and V1-Must closure fixtures in `NetworkToolsFixtures.cs`
+  - 7 configuration export/import fixtures in `ConfigExportImportFixtures.cs`
+  - 16 Wave 5 release engineering, update trust, and installer truth fixtures in `V1Wave5ReleaseFixtures.cs` (W5-REL: canonical version identity, manifest parsing/validation, tampered manifest RSA signature rejection, untrusted key rejection against pinned trust anchor, single-byte tampered payload SHA-256 rejection, staging path traversal prevention, live-writer SQLite WAL snapshot creation and rollback recovery drill with 100% data fidelity, incompatible schema downgrade prevention, bounded operational log rotation with IPv4/MAC/user path redaction, diagnostic bundle sanitized export with live redaction preview, zero-external-network update privacy invariant, Authenticode publisher enforcement, whole-application 3.0s shutdown bound, installer graceful shutdown handshake without destructive force-kill, installer transactional staging and upgrade rollback, installer fresh install and uninstall purge)
   - 3 performance and stability benchmarks (preliminary microbenchmarks)
   - 5 live Windows IP Helper, RouteProvider, TaskbarCompanion, and native WLAN BSSID correlation checks
 - **UI Smoke:** Real WPF shell, production navigation across all 5 primary views individually, Quick Panel, and floating widget smoke passed via `scripts/smoke.ps1` on Windows build 19045 (`.NET 10.0.12`) with all 18 native assertions True.
+- **Release Verification Drill:** Standalone installer `SpeedMeterPro-1.0.0-rc.1-Setup.exe` tested via silent installation and uninstallation drills into sandbox directory with verified Authenticode signature integrity.
 
 ## Implemented verified paths
 

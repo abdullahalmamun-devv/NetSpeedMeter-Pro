@@ -12,5 +12,6 @@
     <ProjectReference Include="../../src/SpeedMeter.Application/SpeedMeter.Application.csproj" />
     <ProjectReference Include="../../src/SpeedMeter.Windows/SpeedMeter.Windows.csproj" />
     <ProjectReference Include="../../src/SpeedMeter.App/SpeedMeter.App.csproj" />
+    <ProjectReference Include="../../src/SpeedMeter.Installer/SpeedMeter.Installer.csproj" />
   </ItemGroup>
 </Project>

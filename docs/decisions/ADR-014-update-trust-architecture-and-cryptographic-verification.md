@@ -63,10 +63,10 @@ The update channel serves a structured, cryptographically signed JSON manifest (
 1. **Manifest Integrity:** The manifest signature is validated against the embedded publisher public key. Any tampering with version, URL, package hash, or schema metadata immediately fails verification.
 2. **Path Traversal Resistance:** The package filename and target staging path are validated to prevent directory traversal attacks (e.g. `../../windows/system32/evil.exe`). Payload staging occurs strictly inside `%LocalAppData%\SpeedMeterPro\staging\`.
 3. **Payload Checksum Verification:** After downloading to quarantine staging, the entire file is hashed with SHA-256 and compared strictly against `packageSha256`. A single flipped byte causes immediate deletion and rejection.
-4. **Authenticode Signature Verification:** The staged binary is verified via Windows Authenticode (`Get-AuthenticodeSignature`). Only binaries signed by the trusted publisher certificate are allowed to execute.
-5. **Database Pre-Migration Snapshot:** Before replacing binaries or launching a newer schema version, an atomic SQLite backup (`speedmeter.db.pre-update-<timestamp>.bak`) is generated via SQLite backup APIs.
+4. **Authenticode Signature Verification & Publisher Enforcement:** The staged binary is verified via Windows Authenticode and X509 certificate chain validation. Rejects unsigned binaries, tampered signatures, and publisher mismatches. Supports dual trust modes: `Production` (strict trusted public root CA chaining and RFC 3161 timestamping) and `DevelopmentTest` (explicit test certificate allowed for lab validation).
+5. **Database Pre-Migration Snapshot (Live Online Backup):** Before replacing binaries or launching a newer schema version, an atomic SQLite backup (`speedmeter.pre-migration-<timestamp>.bak`) is generated using `SqliteConnection.BackupDatabase` (native SQLite C `sqlite3_backup_*` API). This guarantees 100% data fidelity even while background writers are actively committing to SQLite WAL mode.
 6. **Downgrade Rejection:** A binary with a lower schema version is strictly blocked from opening a database that has already been upgraded to a higher schema (`user_version > CurrentSchemaVersion`), preventing corruption.
-7. **Failure Recovery & Rollback:** If a post-update launch fails health checks (corrupt schema or unstartable collector), the pre-migration database snapshot is restored, and the application reports a truthful degraded recovery state.
+7. **Failure Recovery & Rollback:** If a post-update launch fails health checks (corrupt schema or unstartable collector), the pre-migration database snapshot is restored, deleting corrupted main DB and WAL/SHM artifacts and copying the backup snapshot back.
 
 ### 3. Privacy & Network Transparency
 - **Default Cadence:** When update checking is enabled, the check runs at most once every 24 hours with an exponential backoff jitter on connection failure.
@@ -74,13 +74,17 @@ The update channel serves a structured, cryptographically signed JSON manifest (
 - **Zero-Network Invariant:** When `Settings.AutoUpdateCheckEnabled` is set to `false`, zero HTTP requests are initiated by the updater.
 
 ## Decision
-1. Implement the multi-stage cryptographic update verification pipeline in `SpeedMeter.Application`.
-2. Add deterministic test fixtures verifying:
+1. Implement the multi-stage cryptographic update verification pipeline in `SpeedMeter.Application` (`UpdateVerificationService` and `UpdateTrustAnchor`).
+2. Implement native `SqliteConnection.BackupDatabase` for pre-migration snapshots on live WAL databases.
+3. Enforce deterministic canonical manifest bytes (`GetCanonicalManifestBytes`) and pinned RSA public key trust anchor.
+4. Enforce Authenticode publisher matching and dual trust modes (`Production` vs `DevelopmentTest`).
+5. Add deterministic test fixtures verifying:
    - Successful manifest and package validation.
    - Immediate rejection of tampered manifest properties (version, URL, hash).
    - Immediate rejection of corrupted package payload bytes.
-   - Pre-migration SQLite snapshot creation and recovery.
+   - Pre-migration SQLite snapshot creation and rollback on live WAL writer.
    - Downgrade prevention.
+   - Authenticode publisher enforcement.
 
 ## Consequences
 - No unverified executable can ever be staged or executed by SpeedMeter Pro.

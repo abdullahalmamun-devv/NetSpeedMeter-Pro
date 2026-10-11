@@ -5,6 +5,7 @@
     <Project Path="src/SpeedMeter.Application/SpeedMeter.Application.csproj" />
     <Project Path="src/SpeedMeter.Windows/SpeedMeter.Windows.csproj" />
     <Project Path="src/SpeedMeter.App/SpeedMeter.App.csproj" />
+    <Project Path="src/SpeedMeter.Installer/SpeedMeter.Installer.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SpeedMeter.Checks/SpeedMeter.Checks.csproj" />
