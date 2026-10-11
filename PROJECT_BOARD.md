@@ -1,16 +1,16 @@
 # Current milestone
 
-**V1.0 Production Engineering — GATE C FULLY CLOSED · NEXT V1 WAVE AUTHORIZED.** Independent Gate C final DPI closure and forensic audit complete. Resolved coordinate-system space mixing by establishing explicit `PhysicalPoint`, `PhysicalRect`, `DipPoint`, and `DipRect` contracts and a pure physical-pixel placement pipeline. Eliminated WinForms Screen fallback; all monitor resolution uses native Win32 `MonitorFromPoint`, `MonitorFromRect`, `MonitorFromWindow`, and `GetMonitorInfoW`. Quick Panel anchors to source window HWND or mouse cursor via `GetCursorPos`. Taskbar companion scales companion dimensions by `dpiScale` to physical pixels. Tray recovery operates purely semantically via `DisableClickThroughMenuItem` with zero positional index reliance (adversarial reorder test verified). 165 automated checks passing, 1 check explicitly skipped (SkipCheckException demonstration), 0 failed. Real Windows UI smoke test passing with exit code 0 and all 13 native assertions True. Independent Audit Director: lead agent. Updated 11 October 2026 (Asia/Dhaka).
+**V1.0 Production Engineering — V1 CORE TRUTH VERIFIED · NEXT FEATURE WAVE AUTHORIZED.** Independent V1 Core Truth closure complete. Resolved Blocker A (Scope UI invariants: programmatic binding guard in `ApplyInventory`, explicit `Automatic (Recommended)` item, strict non-fallback on missing adapter), Blocker B (Historical & Quota error UX truth: truthful unavailable indicators `—` on storage failure, monotonic query generation counters preventing out-of-order overwrite), and Blocker C (Durable pause/sleep gap persistence: exact elapsed span timestamps, pause-sleep precedence without overlapping gaps, idempotent pause/resume, shutdown gap flush). 183 automated checks passing, 1 check explicitly skipped (SkipCheckException demonstration), 0 failed. Real Windows UI smoke test passing with exit code 0 and all 18 native assertions True. Independent Audit Director: lead agent. Updated 11 October 2026 (Asia/Dhaka).
 
 # In progress
 
-None. V1 Gate C forensic audit and DPI closure fully complete.
+None. V1 Core Truth closure fully complete.
 
 # Ready (Next Wave: V1.5 / Advanced Product Engineering)
 
 | Task | Owner | Reviewer | Dependency | Acceptance |
 |---|---|---|---|---|
-| V1.5-PLAN-001 | Project Director | Software Architect + Product | V1-AUDIT-003 | Author V1.5 Master Execution Plan covering least-privilege ETW network attribution research, dynamic light/system theming, and connectivity tools |
+| V1.5-PLAN-001 | Project Director | Software Architect + Product | V1-TRUTH-001 | Author V1.5 Master Execution Plan covering least-privilege ETW network attribution research, dynamic light/system theming, and connectivity tools |
 
 # Review
 
@@ -20,6 +20,7 @@ None currently.
 
 | Task | Owner | Reviewer | Completion Evidence |
 |---|---|---|---|
+| V1-TRUTH-001 | Independent Audit Director | Software Architect + QA | V1 Core Truth closure: Blocker A (Scope UI binding guards, `Automatic (Recommended)`, missing adapter placeholder without silent fallback), Blocker B (typed query error handling, truthful `—` displays, monotonic query generation protection), Blocker C (exact elapsed pause/sleep gap persistence, pause-sleep precedence, idempotent pause/resume, shutdown flush). 183 passed, 1 skipped, 0 failed. UI smoke verified with 18/18 native assertions True. `V1 CORE TRUTH VERIFIED — NEXT FEATURE WAVE AUTHORIZED`. |
 | V1-AUDIT-003 | Independent Audit Director | Software Architect + QA | Final Gate C native coordinate and UI truth closure: single native HWND positioning authority, elimination of `GetDpiForMonitor` in favor of `GetDpiForWindow`, explicit `DesignWidthDip`/`DesignHeightDip` constants, degradation axis decoupling (`StorageHealth` vs measurement availability), individual primary navigation assertions. 169 passed, 1 skipped, 0 failed. UI smoke verified with 18/18 native assertions True. `GATE C FULLY AND CORRECTLY CLOSED — NEXT V1 WAVE AUTHORIZED`. |
 | V1-DASH-001 | Desktop UI / UX | Accessibility + Product | Complete 5-destination navigation shell (`OverviewView`, `LiveTrafficView`, `AppsView`, `HistoryView`, `NetworkToolsView`, `SettingsView`), MVVM ViewModels, design tokens (`Tokens.xaml`, `ThemeDark.xaml`), tabular numerals, query cancellation token CTS in `HistoryViewModel`, basis points threshold formatting/parsing in `QuotaViewModel`, live graph windowing in `LiveTrafficViewModel`. Verified by fixtures and smoke test. |
 | V1-TRAY-001 | Windows Platform / UI | Architect + QA | `QuickPanelWindow` with multi-monitor work-area clamping, auto-dismiss on deactivate/Escape, Tray menu semantic click-through recovery intact, minimal floating widget synchronized. Verified by `W3-QUICKPANEL` and `smoke.ps1`. |

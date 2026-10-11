@@ -49,6 +49,10 @@ public sealed class Collector : IDisposable
     private long revisionNumber;
     private bool paused;
     private bool suspended;
+    private DateTimeOffset? pauseStartUtc;
+    private double? pauseStartMonotonic;
+    private DateTimeOffset? suspendStartUtc;
+    private double? suspendStartMonotonic;
     private bool disposed;
     private double interval = 1;
     private long sequence;
@@ -176,31 +180,48 @@ public sealed class Collector : IDisposable
         }
     }
 
+    public void Pause()
+    {
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            if (paused) return;
+            paused = true;
+            var time = clock.Read();
+            pauseStartUtc = time.UtcNow;
+            pauseStartMonotonic = time.MonotonicSeconds;
+            PublishInterruption("Paused · this interval is not observed.");
+        }
+    }
+
+    public void Resume()
+    {
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            if (!paused) return;
+            paused = false;
+            var time = clock.Read();
+
+            if (pauseStartUtc is not null)
+            {
+                PersistGapRecord(pauseStartUtc.Value, time.UtcNow, "user_paused");
+                pauseStartUtc = null;
+                pauseStartMonotonic = null;
+            }
+
+            engine.RebaselineForScopeChange(scope);
+            PublishInterruption("Resuming. Establishing a new baseline.");
+        }
+    }
+
     public void TogglePause()
     {
         lock (gate)
         {
             ThrowIfDisposed();
-            paused = !paused;
-            var time = clock.Read();
-
-            if (paused && storage is not null)
-            {
-                var gap = new UsageIntervalRecord(
-                    Guid.NewGuid().ToString("D"),
-                    $"{sessionId}_gap_{sequence}",
-                    sessionId,
-                    clockSegmentId,
-                    scopeRevisionId,
-                    "unidentified",
-                    time.UtcNow.ToUnixTimeMilliseconds() - (long)(interval * 1000),
-                    time.UtcNow.ToUnixTimeMilliseconds(),
-                    (long)(interval * 10_000_000),
-                    0, 0, false, true, "user_paused", "nominal");
-                _ = storage.IngestGapAsync(gap);
-            }
-
-            PublishInterruption(paused ? "Paused · this interval is not observed." : "Resuming. Establishing a new baseline.");
+            if (paused) Resume();
+            else Pause();
         }
     }
 
@@ -209,45 +230,80 @@ public sealed class Collector : IDisposable
         lock (gate)
         {
             ThrowIfDisposed();
+            if (suspended == value) return;
             suspended = value;
             var time = clock.Read();
 
-            if (suspended && storage is not null)
+            if (suspended)
             {
-                var gap = new UsageIntervalRecord(
-                    Guid.NewGuid().ToString("D"),
-                    $"{sessionId}_sleep_{sequence}",
-                    sessionId,
-                    clockSegmentId,
-                    scopeRevisionId,
-                    "unidentified",
-                    time.UtcNow.ToUnixTimeMilliseconds() - (long)(interval * 1000),
-                    time.UtcNow.ToUnixTimeMilliseconds(),
-                    (long)(interval * 10_000_000),
-                    0, 0, false, true, "system_sleep", "nominal");
-                _ = storage.IngestGapAsync(gap);
+                // If already paused by the user, user pause encompasses the gap;
+                // do not record an overlapping suspend gap start.
+                if (!paused)
+                {
+                    suspendStartUtc = time.UtcNow;
+                    suspendStartMonotonic = time.MonotonicSeconds;
+                }
+            }
+            else
+            {
+                if (suspendStartUtc is not null)
+                {
+                    PersistGapRecord(suspendStartUtc.Value, time.UtcNow, "system_sleep");
+                    suspendStartUtc = null;
+                    suspendStartMonotonic = null;
+                }
+
+                if (routeProvider is not null && scopeMode == ScopeMode.AutoPrimary)
+                {
+                    // Re-evaluate routes on system resume
+                    var candidates = routeProvider.GetCandidates();
+                    var evaluated = ScopePolicy.Evaluate(ScopeMode.AutoPrimary, null, candidates, scopeDecision);
+                    if (stabilizer is not null)
+                    {
+                        scopeDecision = stabilizer.Update(evaluated, time.MonotonicSeconds);
+                    }
+                    else
+                    {
+                        scopeDecision = evaluated;
+                    }
+                    scope = scopeDecision.PrimaryAdapterId;
+                    scopeRevisionId = scopeDecision.ScopeId.ToString("D") + "_" + scopeDecision.Revision;
+                    engine.RebaselineForScopeChange(scope);
+                }
+                else if (!paused)
+                {
+                    engine.RebaselineForScopeChange(scope);
+                }
             }
 
-            if (!suspended && routeProvider is not null && scopeMode == ScopeMode.AutoPrimary)
-            {
-                // Re-evaluate routes on system resume
-                var candidates = routeProvider.GetCandidates();
-                var evaluated = ScopePolicy.Evaluate(ScopeMode.AutoPrimary, null, candidates, scopeDecision);
-                if (stabilizer is not null)
-                {
-                    scopeDecision = stabilizer.Update(evaluated, time.MonotonicSeconds);
-                }
-                else
-                {
-                    scopeDecision = evaluated;
-                }
-                scope = scopeDecision.PrimaryAdapterId;
-                scopeRevisionId = scopeDecision.ScopeId.ToString("D") + "_" + scopeDecision.Revision;
-                engine.RebaselineForScopeChange(scope);
-            }
-
-            PublishInterruption(value ? "System suspended · monitoring gap." : "System resumed. Establishing a new baseline.");
+            PublishInterruption(value ? "System suspended · monitoring gap." : paused ? "Paused · this interval is not observed." : "System resumed. Establishing a new baseline.");
         }
+    }
+
+    private Task? PersistGapRecord(DateTimeOffset startUtc, DateTimeOffset endUtc, string reason)
+    {
+        if (storage is null) return null;
+        var now = clock.Read();
+        EnsureStorageSessionInitialized(now);
+
+        var startMs = startUtc.ToUnixTimeMilliseconds();
+        var endMs = endUtc.ToUnixTimeMilliseconds();
+        if (endMs <= startMs) endMs = startMs + 1;
+        var durationTicks = checked(Math.Max(10_000L, (endMs - startMs) * 10_000L));
+
+        var gap = new UsageIntervalRecord(
+            Guid.NewGuid().ToString("D"),
+            $"{sessionId}_gap_{sequence++}",
+            sessionId,
+            clockSegmentId,
+            scopeRevisionId,
+            "unidentified",
+            startMs,
+            endMs,
+            durationTicks,
+            0, 0, false, true, reason, "nominal");
+
+        return storage.IngestGapAsync(gap);
     }
 
     private CollectorSnapshot PublishInterruption(string runningDetail)
@@ -562,13 +618,27 @@ public sealed class Collector : IDisposable
             disposed = true;
             cancellation.Cancel();
             pending = worker;
-            Publish(CollectorState.Stopped, engine.Interrupt(clock.Read().UtcNow, ReadingState.Unavailable, "Monitoring stopped."));
+            var now = clock.Read();
+            Publish(CollectorState.Stopped, engine.Interrupt(now.UtcNow, ReadingState.Unavailable, "Monitoring stopped."));
 
             if (storage is not null)
             {
                 try
                 {
-                    storage.RecordSessionEndAsync(sessionId, DateTimeOffset.UtcNow, true, "normal_shutdown").GetAwaiter().GetResult();
+                    if (paused && pauseStartUtc is not null)
+                    {
+                        var task = PersistGapRecord(pauseStartUtc.Value, now.UtcNow, "user_paused");
+                        pauseStartUtc = null;
+                        task?.GetAwaiter().GetResult();
+                    }
+                    else if (suspended && suspendStartUtc is not null)
+                    {
+                        var task = PersistGapRecord(suspendStartUtc.Value, now.UtcNow, "system_sleep");
+                        suspendStartUtc = null;
+                        task?.GetAwaiter().GetResult();
+                    }
+
+                    storage.RecordSessionEndAsync(sessionId, now.UtcNow, true, "normal_shutdown").GetAwaiter().GetResult();
                     storage.FlushAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
                 }
                 catch { }

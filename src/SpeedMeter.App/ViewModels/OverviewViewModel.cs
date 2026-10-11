@@ -37,6 +37,7 @@ public sealed class OverviewViewModel : ViewModelBase
     private string quotaRemainingText = "—";
     private double quotaPercent;
     private string quotaBadgeText = "Off";
+    private long queryGeneration;
 
     public string DownloadRateText { get => downloadRateText; private set => SetProperty(ref downloadRateText, value); }
     public string UploadRateText { get => uploadRateText; private set => SetProperty(ref uploadRateText, value); }
@@ -130,6 +131,7 @@ public sealed class OverviewViewModel : ViewModelBase
 
     public async Task RefreshHistoryAndQuotaAsync(CancellationToken ct = default)
     {
+        var gen = Interlocked.Increment(ref queryGeneration);
         var settings = settingsService.CurrentSettings;
         var tzId = settings.ReportingTimezoneId ?? TimeZoneInfo.Local.Id;
         var nowUtc = DateTimeOffset.UtcNow;
@@ -144,6 +146,8 @@ public sealed class OverviewViewModel : ViewModelBase
                 cycleDay: cycleDay,
                 ct: ct).ConfigureAwait(true);
 
+            if (gen != Interlocked.Read(ref queryGeneration)) return;
+
             TodayRxText = MetricFormat.Bytes(summary.BytesRx);
             TodayTxText = MetricFormat.Bytes(summary.BytesTx);
             TodayTotalText = MetricFormat.Bytes(summary.TotalBytes);
@@ -152,9 +156,16 @@ public sealed class OverviewViewModel : ViewModelBase
             TodayCoverageText = $"{summary.CoverageRatio * 100:F1}% · {summary.Completeness}";
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex)
+        catch (Exception)
         {
-            TodayCoverageText = $"Error: {ex.Message}";
+            if (gen != Interlocked.Read(ref queryGeneration)) return;
+
+            TodayTotalText = "—";
+            TodayRxText = "—";
+            TodayTxText = "—";
+            TodayCoverageRatio = 0;
+            TodayCompleteness = CompletenessState.NoCoverage;
+            TodayCoverageText = "Today's usage unavailable";
         }
 
         try
@@ -164,6 +175,8 @@ public sealed class OverviewViewModel : ViewModelBase
             {
                 QuotaEnabled = true;
                 var eval = await quotaService.EvaluateCurrentCycleAsync(rule, nowUtc, ct).ConfigureAwait(true);
+
+                if (gen != Interlocked.Read(ref queryGeneration)) return;
 
                 var usedFormatted = MetricFormat.Bytes(eval.EffectiveUsedBytes);
                 var limitFormatted = MetricFormat.Bytes(rule.LimitBytes);
@@ -187,7 +200,12 @@ public sealed class OverviewViewModel : ViewModelBase
         catch (OperationCanceledException) { }
         catch
         {
-            QuotaSummaryText = "Quota unavailable";
+            if (gen != Interlocked.Read(ref queryGeneration)) return;
+
+            QuotaSummaryText = "Quota status unavailable";
+            QuotaRemainingText = "—";
+            QuotaPercent = 0;
+            QuotaBadgeText = "Unavailable";
         }
     }
 }

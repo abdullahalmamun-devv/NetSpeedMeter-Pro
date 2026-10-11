@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -39,10 +40,16 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer displayTimer;
     private CollectorSnapshot? displayed;
     private int tickCount;
+    private bool updatingAdapterPicker;
+    private string? rememberedSelectedAdapterId;
+    private long historicalRefreshId;
 
     internal Forms.ToolStripMenuItem DisableClickThroughMenuItem => disableClickThroughMenuItem;
 
-    private sealed record AdapterOption(string Id, string Label, string Description);
+    internal sealed record AdapterOption(string? Id, string Label, string Description)
+    {
+        public bool IsAutoPrimary => Id is null;
+    }
 
     public MainWindow(string? smokeDirectory)
     {
@@ -103,6 +110,7 @@ public partial class MainWindow : Window
 
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
         SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
+        ApplyInventory(monitor.Latest.Observation.Adapters);
         Closing += OnClosing;
         Loaded += OnLoaded;
     }
@@ -391,6 +399,7 @@ public partial class MainWindow : Window
 
     private async Task RefreshHistoricalCardsAsync()
     {
+        var refreshId = Interlocked.Increment(ref historicalRefreshId);
         try
         {
             var settings = monitor.SettingsService.CurrentSettings;
@@ -399,6 +408,8 @@ public partial class MainWindow : Window
 
             var summary = await monitor.HistoryService.GetPeriodSummaryAsync(
                 QueryPeriodType.Today, tzId, nowUtc, cycleDay: settings.ActiveQuotaRule?.CycleDay ?? 1);
+
+            if (refreshId != Interlocked.Read(ref historicalRefreshId)) return;
 
             TodayTotalText.Text = MetricFormat.Bytes(summary.TotalBytes);
             TodayRxText.Text = MetricFormat.Bytes(summary.BytesRx);
@@ -409,6 +420,8 @@ public partial class MainWindow : Window
             if (rule is { Enabled: true })
             {
                 var eval = await monitor.QuotaService.EvaluateCurrentCycleAsync(rule, nowUtc);
+                if (refreshId != Interlocked.Read(ref historicalRefreshId)) return;
+
                 var pct = eval.PercentUsed;
                 QuotaSummaryText.Text = $"{MetricFormat.Bytes(eval.EffectiveUsedBytes)} / {MetricFormat.Bytes(rule.LimitBytes)} ({pct:F1}%)";
                 QuotaProgressBar.Value = Math.Min(100.0, pct);
@@ -423,28 +436,92 @@ public partial class MainWindow : Window
                 QuotaBadgeText.Text = "Off";
             }
         }
-        catch { }
+        catch (OperationCanceledException)
+        {
+            // Canceled queries safely exit
+        }
+        catch (Exception)
+        {
+            if (refreshId != Interlocked.Read(ref historicalRefreshId)) return;
+
+            TodayTotalText.Text = "—";
+            TodayRxText.Text = "—";
+            TodayTxText.Text = "—";
+            TodayCoverageText.Text = "Today's usage unavailable";
+
+            QuotaSummaryText.Text = "Quota status unavailable";
+            QuotaProgressBar.Value = 0;
+            QuotaRemainingText.Text = "—";
+            QuotaBadgeText.Text = "Unavailable";
+        }
     }
 
     private void ApplyInventory(IReadOnlyList<AdapterCounter> adapters)
     {
-        var key = string.Join("|", adapters.Select(a => $"{a.Id}:{a.Name}:{a.IsUp}"));
+        var currentMode = monitor.Mode;
+        var activePrimaryId = monitor.ScopeDecision.PrimaryAdapterId;
+        var key = $"{currentMode}:{activePrimaryId}:{rememberedSelectedAdapterId}:" +
+                  string.Join("|", adapters.Select(a => $"{a.Id}:{a.Name}:{a.IsUp}"));
         if (key == inventoryKey) return;
         inventoryKey = key;
 
-        var selected = (AdapterPicker.SelectedItem as AdapterOption)?.Id;
-        var items = adapters.Select(a => new AdapterOption(a.Id, a.Name, $"{a.Description} · Status: {(a.IsUp ? "Up" : "Down")}")).ToList();
+        updatingAdapterPicker = true;
+        try
+        {
+            var resolvedAdapter = adapters.FirstOrDefault(a => a.Id == activePrimaryId);
+            var autoDescription = resolvedAdapter is not null
+                ? $"Dynamic route determination via AutoPrimary. Currently using: {resolvedAdapter.Name}. Virtual tunnel traffic is strictly isolated."
+                : "Dynamic route determination via AutoPrimary. Virtual tunnel traffic is strictly isolated.";
 
-        AdapterPicker.ItemsSource = items;
-        if (selected is not null)
-        {
-            var match = items.FirstOrDefault(i => i.Id == selected);
-            if (match is not null) AdapterPicker.SelectedItem = match;
-            else if (items.Count > 0) AdapterPicker.SelectedIndex = 0;
+            var autoOption = new AdapterOption(null, "Automatic (Recommended)", autoDescription);
+
+            var items = new List<AdapterOption> { autoOption };
+            items.AddRange(adapters.Select(a =>
+                new AdapterOption(a.Id, a.Name, $"{a.Description} · Status: {(a.IsUp ? "Up" : "Down")}")));
+
+            if (currentMode == ScopeMode.SelectedAdapter)
+            {
+                var targetId = rememberedSelectedAdapterId ?? activePrimaryId;
+                if (!string.IsNullOrEmpty(targetId))
+                {
+                    var match = items.FirstOrDefault(i => i.Id == targetId);
+                    if (match is not null)
+                    {
+                        AdapterPicker.ItemsSource = items;
+                        AdapterPicker.SelectedItem = match;
+                        ScopeDescription.Text = match.Description;
+                    }
+                    else
+                    {
+                        // Missing selected adapter: NEVER silently fallback to another adapter
+                        var missingOption = new AdapterOption(
+                            targetId,
+                            $"Missing adapter ({targetId})",
+                            $"Selected adapter ({targetId}) unavailable. Automatic fallback is disabled.");
+                        items.Add(missingOption);
+                        AdapterPicker.ItemsSource = items;
+                        AdapterPicker.SelectedItem = missingOption;
+                        ScopeDescription.Text = missingOption.Description;
+                    }
+                }
+                else
+                {
+                    AdapterPicker.ItemsSource = items;
+                    AdapterPicker.SelectedItem = null;
+                    ScopeDescription.Text = "No adapter selected. Choose an adapter from the interface inventory.";
+                }
+            }
+            else
+            {
+                // AutoPrimary mode
+                AdapterPicker.ItemsSource = items;
+                AdapterPicker.SelectedItem = autoOption;
+                ScopeDescription.Text = autoDescription;
+            }
         }
-        else if (items.Count > 0 && AdapterPicker.SelectedIndex < 0)
+        finally
         {
-            AdapterPicker.SelectedIndex = 0;
+            updatingAdapterPicker = false;
         }
     }
 
@@ -456,16 +533,71 @@ public partial class MainWindow : Window
 
     private void AdapterChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (updatingAdapterPicker) return;
         if (AdapterPicker.SelectedItem is AdapterOption option)
         {
-            monitor.Select(option.Id);
+            if (option.IsAutoPrimary)
+            {
+                rememberedSelectedAdapterId = null;
+                monitor.SetScope(ScopeMode.AutoPrimary, null);
+                UpdateScopeDescription();
+            }
+            else
+            {
+                rememberedSelectedAdapterId = option.Id;
+                monitor.SetScope(ScopeMode.SelectedAdapter, option.Id);
+                ScopeDescription.Text = option.Description;
+            }
+        }
+    }
+
+    private void UpdateScopeDescription()
+    {
+        if (monitor.Mode == ScopeMode.AutoPrimary)
+        {
+            var activeId = monitor.ScopeDecision.PrimaryAdapterId;
+            var adapter = monitor.Latest.Observation.Adapters.FirstOrDefault(a => a.Id == activeId);
+            ScopeDescription.Text = adapter is not null
+                ? $"Dynamic route determination via AutoPrimary. Currently using: {adapter.Name}. Virtual tunnel traffic is strictly isolated."
+                : "Dynamic route determination via AutoPrimary. Virtual tunnel traffic is strictly isolated.";
+        }
+        else if (AdapterPicker.SelectedItem is AdapterOption option)
+        {
             ScopeDescription.Text = option.Description;
         }
     }
 
     private async void RefreshAdapters(object sender, RoutedEventArgs e)
     {
+        inventoryKey = string.Empty;
         await RefreshInventoryAsync();
+    }
+
+    internal MonitorSession MonitorSessionInstance => monitor;
+    internal string? RememberedAdapterId => rememberedSelectedAdapterId;
+    internal string? SelectedAdapterId => (AdapterPicker.SelectedItem as AdapterOption)?.Id;
+    internal string? SelectedAdapterLabel => (AdapterPicker.SelectedItem as AdapterOption)?.Label;
+
+    internal void TriggerRefreshAdapters()
+    {
+        inventoryKey = string.Empty;
+        ApplyInventory(monitor.Latest.Observation.Adapters);
+    }
+
+    internal void SimulateApplyInventory(IReadOnlyList<AdapterCounter> adapters)
+    {
+        inventoryKey = string.Empty;
+        ApplyInventory(adapters);
+    }
+
+    internal void SimulateUserSelectAdapter(string id)
+    {
+        var targetOption = (AdapterPicker.ItemsSource as IEnumerable<AdapterOption>)?.FirstOrDefault(o => o.Id == id)
+            ?? new AdapterOption(id, $"Adapter ({id})", $"Simulated selection for {id}");
+        AdapterPicker.SelectedItem = targetOption;
+        rememberedSelectedAdapterId = id;
+        monitor.SetScope(ScopeMode.SelectedAdapter, id);
+        ScopeDescription.Text = targetOption.Description;
     }
 
     public void ToggleUnits(object sender, RoutedEventArgs e)

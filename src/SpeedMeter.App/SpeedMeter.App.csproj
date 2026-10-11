@@ -13,5 +13,6 @@
     <ProjectReference Include="../SpeedMeter.Core/SpeedMeter.Core.csproj" />
     <ProjectReference Include="../SpeedMeter.Application/SpeedMeter.Application.csproj" />
     <ProjectReference Include="../SpeedMeter.Windows/SpeedMeter.Windows.csproj" />
+    <InternalsVisibleTo Include="SpeedMeter.Checks" />
   </ItemGroup>
 </Project>

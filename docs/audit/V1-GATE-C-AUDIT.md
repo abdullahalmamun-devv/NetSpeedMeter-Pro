@@ -222,9 +222,48 @@ Modelled 5 deterministic heterogeneous multi-monitor topologies in `V1Wave3Fixtu
 
 ---
 
-## 8. Final Authoritative Decision
+---
+
+## 8. V1 Core Truth Closure Addendum
+
+An independent forensic review evaluated the V1 presentation and lifecycle truth boundaries prior to authorizing subsequent feature waves. Three critical blockers were identified and remediated:
+
+### 8.1 Blocker A: Scope UI Invariants & Programmatic Binding Guard
+- **Root Cause:** In `MainWindow.xaml.cs`, population of the adapter picker inadvertently fired selection change events during initialization and adapter refreshes, converting canonical `AutoPrimary` routing into `SelectedAdapter` mode without explicit user intent. Furthermore, when a remembered adapter disconnected, the picker risked falling back to another adapter.
+- **Repair:**
+  1. Introduced explicit programmatic guard `updatingAdapterPicker` inside `ApplyInventory` wrapped in `try { ... } finally { updatingAdapterPicker = false; }`.
+  2. In `AdapterChanged`: if `updatingAdapterPicker == true`, immediately return without modifying collector scope.
+  3. Added explicit first item `Automatic (Recommended)` (ID: `null`) reflecting canonical `AutoPrimary` routing and dynamic egress.
+  4. Enforced strict selection invariant: if a remembered selected adapter disappears from the OS inventory, the UI retains `SelectedAdapter` mode and appends a disabled placeholder item `Missing adapter ({id})` with unavailable status. It never falls back or switches to another adapter.
+  5. User-initiated "Refresh" strictly preserves `ScopeMode`, `ScopeRevision`, and accounting stream boundaries without triggering spurious rebaselines.
+- **Verification:** Verified by fixtures `W3-SCOPE-AUTO-START`, `W3-SCOPE-REFRESH-STABILITY`, `W3-SCOPE-SELECTED-MISSING`, `W3-SCOPE-SELECTED-RETURN`, and `W3-SCOPE-PROGRAMMATIC-GUARD`.
+
+### 8.2 Blocker B: Historical & Quota UX Error Truth
+- **Root Cause:** Historical and quota summary refreshing swallowed query exceptions via `catch { }`, leaving stale or uninitialized numbers visible on query failure and allowing slow out-of-order queries to overwrite newer selections.
+- **Repair:**
+  1. Replaced empty catch blocks with typed exception handling (`catch (OperationCanceledException)` and `catch (Exception ex)`).
+  2. On query failure, historical cards immediately transition to truthful unavailable state: `TodayTotalText = "—"`, `TodayRxText = "—"`, `TodayTxText = "—"`, and `TodayCoverageText = "Today's usage unavailable"`.
+  3. Quota evaluation failure displays `QuotaSummaryText = "Quota status unavailable"`, `QuotaRemainingText = "—"`, and `QuotaBadgeText = "Unavailable"`.
+  4. Added request generation tracking (`historicalRefreshId` in `MainWindow`, `queryGeneration` in `OverviewViewModel`) to discard slow or out-of-order query returns. Subsequent successful queries cleanly restore live values.
+- **Verification:** Verified by fixtures `W3-HIST-ERROR-TRUTH`, `W3-QUOTA-ERROR-TRUTH`, `W3-HIST-QUERY-RECOVERY`, and `W3-HIST-STALE-GENERATION`.
+
+### 8.3 Blocker C: Durable Pause & Sleep Lifecycle Gaps
+- **Root Cause:** Calling `Collector.TogglePause()` or `SetSuspended(true)` previously recorded an immediate nominal 1-interval gap on entry instead of recording the true elapsed duration upon resume or shutdown.
+- **Repair:**
+  1. Replaced immediate gap writes on pause/suspend entry with exact timestamp recording (`pauseStartUtc`, `pauseStartMonotonic`, `suspendStartUtc`, `suspendStartMonotonic`).
+  2. Resuming from pause records a single exact gap interval covering `[pauseStartUtc, resumeUtc)` with reason `"user_paused"`.
+  3. Resuming from suspend records a single exact gap interval covering `[suspendStartUtc, resumeUtc)` with reason `"system_sleep"`.
+  4. Precedence rule: user pause encompasses sleep. If the system suspends while user-paused, no overlapping `system_sleep` gap is emitted; the entire duration is persisted under the user pause span.
+  5. Idempotent pause/resume: redundant calls do not emit spurious or zero-length gaps.
+  6. Shutdown durability: disposing `Collector` while paused or suspended flushes the active elapsed gap up to the shutdown timestamp before ending the session.
+- **Verification:** Verified by fixtures `W3-LIFECYCLE-PAUSE-GAP-DURATION`, `W3-LIFECYCLE-PAUSE-DISPOSE-GAP`, `W3-LIFECYCLE-SLEEP-GAP-DURATION`, `W3-LIFECYCLE-PAUSE-SLEEP-PRECEDENCE`, and `W3-LIFECYCLE-IDEMPOTENT-PAUSE-RESUME`.
+
+---
+
+## 9. Final Authoritative Decision
 
 ```text
-GATE C FULLY AND CORRECTLY CLOSED — NEXT V1 WAVE AUTHORIZED
+V1 CORE TRUTH VERIFIED — NEXT FEATURE WAVE AUTHORIZED
 ```
+
 

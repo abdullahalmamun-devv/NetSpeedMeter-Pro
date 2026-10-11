@@ -1,57 +1,68 @@
 # SpeedMeter Pro
 
-A native Windows network meter, started from `Premium-Speed-Meter-PRD.md`.
-**Status: first P0 feasibility slice, not V1 and not a completed P0 gate.**
+A high-performance, truthful Windows desktop network telemetry, accounting, and visualization application, engineered strictly from `Premium-Speed-Meter-PRD.md`.
 
-Initial verification: Release build passed with zero warnings/errors; 15 core/Windows checks passed; the real WPF smoke workflow passed. See `docs/VALIDATION.md` for environment, evidence and limits. Windows 11 validation remains pending.
+**Status: V1.0 Core Truth Verified · Production Desktop Surface Integrated (Gate A, B, and C Closed).**
 
-## Run
+The full verification suite passes with 183 automated checks passed, 1 platform timezone check explicitly skipped, and 0 failures. The native WPF UI smoke test passes with all 18 native assertions verified (`True`) on Windows 10 x64.
 
-Windows x64 and .NET SDK **10.0.401** are required. This workspace has a local SDK in `.tools/dotnet`; scripts use it first, falling back to an installed SDK. The app runs as a standard user.
+---
+
+## Quick Start
+
+Windows x64 and .NET SDK **10.0.401** are required. This repository includes a local SDK configuration under `.tools/dotnet`; scripts use it first, falling back to an installed system SDK. The application runs as a standard Windows user without requiring administrative privileges.
 
 ```powershell
 .\scripts\build.ps1
 .\scripts\check.ps1 -Windows
+.\scripts\smoke.ps1
 .\scripts\run.ps1
 ```
 
-Select your Wi-Fi or Ethernet adapter to start. The first sample establishes a baseline; the next displays a rate. **Show widget** opens the movable floating meter. Its right-click menu opens the dashboard or hides the widget; Enter opens the dashboard and Escape hides it. Dashboard close continues in the tray with an explanation; **Quit** stops collection.
+---
 
-## Implemented
+## Core Architecture & Implemented Capabilities
 
-- Native `GetIfTable2` adapter inventory and 64-bit counters; loopback excluded.
-- Explicit single-adapter scope. No automatic route inference or multi-adapter summation.
-- Actual monotonic elapsed-time rates, decimal byte/bit display, exact session byte totals.
-- Baseline/reset/disconnect/pause handling; sleep/resume event handling.
-- WPF dashboard, 60-second live graph, floating widget and notification-area controls.
-- 0.5 / 1 / 2-second sampling, session reset, unit switching, adapter refresh.
-- In-memory state only; no active network probes, accounts, analytics, startup registration or service installation.
-- Dependency-free fixture runner and Windows counter comparison. Automated UI smoke mode renders a screenshot and records live-reading assertions.
+### 1. Telemetry & Measurement Engine
+- **Native Counter Acquisition:** Real-time 64-bit octet counters queried via Win32 IP Helper `GetIfTable2`. Loopback interfaces excluded.
+- **Monotonic Timing Domain:** Strict monotonic elapsed time intervals with microsecond precision. True rate calculations without synthetic zero smoothing.
+- **Dynamic Route-Aware Scope:** Automatic primary egress detection (`RouteProvider`) with a 3.0-second debounce stabilizer (`ScopeStabilizer`) to eliminate route flapping. Preserves cumulative session octets while seamlessly rebaselining rates upon route handoff.
+- **Scope UI Protection:** Programmatic binding guards prevent UI adapter selection from overriding canonical `AutoPrimary` routing. When a selected adapter disconnects, the selection identity is preserved without silent fallback to another adapter.
 
-## Boundaries
+### 2. Accounting Stream & Persistence
+- **Canonical Half-Open Intervals:** Persistent SQLite accounting stream structured into canonical `[StartUtcMs, EndUtcMs)` half-open intervals. Zero SQL `SUM()` queries over unpartitioned rows.
+- **Deterministic Integer Splitting:** `IntegerSplitter` uses `Int128` precision to distribute usage across calendar/billing boundaries while guaranteeing exact partition conservation ($\sum \text{allocated} \equiv \text{original}$) with zero truncation or rounding drift.
+- **Durable Lifecycle Gaps:** Pauses (`user_paused`), system sleep/hibernation (`system_sleep`), and crashes (`unclean_shutdown`) are recorded as durable non-overlapping gap records with exact elapsed timestamps.
+- **High-Performance Storage:** Managed SQLite WAL mode engine (`SpeedMeter.Storage`) with single-writer bounded channel, `PRAGMA synchronous = FULL`, foreign key validation, and BLOB counter checkpoints.
 
-Adapter counters include LAN and potentially tunnel traffic; they are not an ISP billing record. Select a physical adapter for an explicit physical-boundary view. Changing scope starts a new in-memory session. Pause/quit/sleep create unobserved spans; bytes across these gaps are not reconstructed.
+### 3. Usage, Calendar, Billing & Quota
+- **Timezone & Calendar Awareness:** Local calendar boundaries (Today, Yesterday, This Week, This Month, Billing Cycle) calculated by `CalendarRangeResolver` with dynamic month clamping (day 31 in February clamps to 28/29 without mutating the rule) and full DST transition handling (including non-1-hour transitions).
+- **Quota Engine:** Multi-rule quota evaluation with integer basis points precision (e.g. 8000 = 80.00%, 10000 = 100.00%). Monotonic threshold crossings are deduplicated in SQLite (`quota_threshold_events`) and guaranteed to fire at most once per cycle across restarts.
+- **Truthful Error States:** If the storage engine is unavailable or queries fail, historical cards and quota displays render truthful unavailable indicators (`—`) rather than displaying stale numbers. Monotonic query generations prevent out-of-order slow query overwrites.
 
-History, quotas, exports, settings persistence, automatic route selection, taskbar docking, app attribution, connection probes, installers and updates remain planned. The sidebar labels planned destinations; it does not simulate those features. No release-level accuracy, performance, accessibility or compatibility claims have been established. See `docs/P0-STATUS.md` for the next gates.
+### 4. User Interface & Windows Platform
+- **WPF Navigation Shell:** Modern dark-theme desktop shell with full MVVM decoupling across 5 primary views (Overview, Live Traffic, Apps, Usage & History, Network Tools) and Settings.
+- **PerMonitorV2 DPI Placement:** Native Win32 positioning pipeline (`PlacementHelper`) using `GetDpiForWindow`, `MonitorFromPoint`, and `SetWindowPos`. Robust across heterogeneous multi-monitor DPI scaling, negative virtual desktop origins, and taskbar docks.
+- **Quick Panel & Floating Widget:** Accessible, movable desktop companion with tabular numerals, keyboard nudging, opacity control, and click-through recovery via the system tray menu (`DisableClickThroughMenuItem`).
+- **Data Export:** Keyset-cursor paged CSV streaming and typed JSON export with formula injection neutralization (`=`, `+`, `-`, `@`, `\t`, `\r`) and atomic file replacement (`.tmp` -> target).
 
-## Structure
+---
 
-- `src/SpeedMeter.Core`: provider-independent accounting and formatting.
-- `src/SpeedMeter.Windows`: IP Helper interop and adapter observations.
-- `src/SpeedMeter.App`: WPF UI and background collection lifecycle.
-- `tests/SpeedMeter.Checks`: deterministic verification and optional real Windows checks.
-- `docs`: decisions, scope and validation evidence.
+## Architectural Boundaries & Gating
 
-Package sources are deliberately empty because this slice uses only SDK/framework libraries. Review and add sources when a dependency such as SQLite is introduced. Nothing is published or installed system-wide.
+- **Adapter Octets vs Application Attribution:** SpeedMeter Pro's canonical accounting tracks interface octets via IP Helper. Per-process network attribution is gated to **V1.5**; standard-user processes cannot capture kernel ETW network events without elevation or least-privilege ETW adjustments, which remain active research paths.
+- **No In-Process DeskBand / Explorer Injection:** SpeedMeter Pro explicitly rejects Microsoft's deprecated DeskBand COM interfaces and Explorer memory injection. The taskbar companion is implemented as an out-of-process, borderless, top-level window anchored adjacent to the taskbar work-area boundary with an automatic floating fallback.
+- **No Summation of VPN and Physical Interfaces:** Physical network adapters and virtual VPN tunnel adapters occupy separate measurement domains. SpeedMeter Pro never automatically sums VPN and physical counters.
+- **Local-First & Standard User:** Operates completely offline without background cloud services, mandatory user accounts, or telemetry phone-home.
 
-## UI smoke check
+---
 
-```powershell
-.\scripts\smoke.ps1
-```
+## Repository Structure
 
-This opens the real WPF dashboard briefly, explicitly selects the first available adapter for the smoke run (active hardware adapters sort first), collects actual counter readings, checks units/pause/reset/resume, writes `dashboard.png`, `widget.png` and `smoke.json` under a timestamped `artifacts` folder, and quits. It does not generate traffic. A machine without a usable adapter cannot pass the live-reading assertion.
-
-## SDK setup on another machine
-
-Install the official .NET 10 x64 SDK, or use Microsoft's `dotnet-install.ps1` with `-Version 10.0.401 -InstallDir .tools/dotnet -NoPath`. The local SDK is ignored by Git. SDK selection follows `global.json`.
+- `src/SpeedMeter.Core`: Pure domain contracts, measurement math, calendar resolver, quota evaluator, integer splitting, and immutable models. Zero external dependencies.
+- `src/SpeedMeter.Windows`: Native Win32 interop (IP Helper `GetIfTable2`, Win32 routing table, PerMonitorV2 placement helpers, taskbar query helpers).
+- `src/SpeedMeter.Storage`: SQLite database engine, WAL persistence, migrations, and keyset pagination.
+- `src/SpeedMeter.Application`: High-level application services (`Collector`, `UsageHistoryService`, `QuotaService`, `SettingsService`, `ExportService`). Decouples UI from storage mechanics.
+- `src/SpeedMeter.App`: WPF presentation layer, XAML views, ViewModels, design tokens, Quick Panel, and floating widget companion. Completely decoupled from direct storage and SQLite references.
+- `tests/SpeedMeter.Checks`: Standalone, dependency-free verification fixture runner covering core math, storage durability, lifecycle invariants, DPI placement, and live Windows hardware checks.
+- `scripts`: PowerShell automation for clean builds, test execution (`check.ps1`), native UI smoke testing (`smoke.ps1`), and application launch (`run.ps1`).

@@ -36,6 +36,8 @@ public sealed class MonitorSession : IDisposable
     }
 
     public bool Paused => Collector.Paused;
+    public ScopeMode Mode => Collector.Mode;
+    public CanonicalScopeDecision ScopeDecision => Collector.ScopeDecision;
 
     public void Start() => Collector.Start();
 

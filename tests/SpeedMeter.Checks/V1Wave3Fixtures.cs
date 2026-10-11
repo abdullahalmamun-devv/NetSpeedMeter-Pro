@@ -975,7 +975,7 @@ public static class V1Wave3Fixtures
         return dispatcher!;
     });
 
-    private static void RunOnSta(Action action)
+    internal static void RunOnSta(Action action)
     {
         Exception? error = null;
         staDispatcher.Value.Invoke(() =>
