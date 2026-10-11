@@ -10,7 +10,7 @@ public sealed class IncompatibleSchemaException : Exception
 
 public static class SqliteMigrations
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public static void ApplyMigrations(SqliteConnection connection)
     {
@@ -41,6 +41,10 @@ public static class SqliteMigrations
         if (currentVersion < 1)
         {
             ApplyMigration1(connection);
+        }
+        if (currentVersion < 2)
+        {
+            ApplyMigration2(connection);
         }
     }
 
@@ -189,6 +193,43 @@ public static class SqliteMigrations
 
                     INSERT INTO schema_migrations (version, migration_id, checksum, applied_at_utc_ms)
                     VALUES (1, 'V1_INITIAL_SCHEMA', '1a8f9b4c', " + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + @");
+                    PRAGMA user_version = 1;
+                ";
+                cmd.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
+    private static void ApplyMigration2(SqliteConnection connection)
+    {
+        using var tx = connection.BeginTransaction();
+        try
+        {
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS quota_threshold_events (
+                        event_id TEXT NOT NULL PRIMARY KEY,
+                        rule_id TEXT NOT NULL,
+                        rule_revision INTEGER NOT NULL CHECK(rule_revision > 0),
+                        cycle_identifier TEXT NOT NULL,
+                        threshold_percent REAL NOT NULL CHECK(threshold_percent > 0),
+                        crossed_at_utc_ms INTEGER NOT NULL,
+                        effective_usage_bytes INTEGER NOT NULL,
+                        UNIQUE(rule_id, rule_revision, cycle_identifier, threshold_percent)
+                    ) STRICT;
+
+                    INSERT INTO schema_migrations (version, migration_id, checksum, applied_at_utc_ms)
+                    VALUES (2, 'V2_QUOTA_THRESHOLD_EVENTS', '2b9f1c7d', " + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + @");
+
+                    PRAGMA user_version = 2;
                 ";
                 cmd.ExecuteNonQuery();
             }

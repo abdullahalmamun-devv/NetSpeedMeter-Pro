@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
+using SpeedMeter.Core;
 
 namespace SpeedMeter.Storage;
 
@@ -21,6 +22,7 @@ public sealed class SqliteStorageEngine : IStorageEngine
     private sealed record CheckpointCmd(CounterCheckpointRecord Record) : IStorageCommand;
     private sealed record IntervalCmd(UsageIntervalRecord Record, CounterCheckpointRecord? Checkpoint = null) : IStorageCommand;
     private sealed record GapCmd(UsageIntervalRecord Record) : IStorageCommand;
+    private sealed record QuotaEventCmd(QuotaThresholdEvent Record) : IStorageCommand;
     private sealed record FlushCmd(TaskCompletionSource<bool> Tcs) : IStorageCommand;
 
     private readonly string connectionString;
@@ -281,6 +283,9 @@ public sealed class SqliteStorageEngine : IStorageEngine
                             ExecuteInterval(conn, tx, gap.Record);
                             Interlocked.Increment(ref persistedGaps);
                             break;
+                        case QuotaEventCmd qe:
+                            ExecuteQuotaEvent(conn, tx, qe.Record);
+                            break;
                         case FlushCmd flush:
                             flushCompletions.Add(flush.Tcs);
                             break;
@@ -454,6 +459,26 @@ public sealed class SqliteStorageEngine : IStorageEngine
         cmd.ExecuteNonQuery();
     }
 
+    private static void ExecuteQuotaEvent(SqliteConnection conn, SqliteTransaction tx, QuotaThresholdEvent r)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"
+            INSERT OR IGNORE INTO quota_threshold_events(
+                event_id, rule_id, rule_revision, cycle_identifier, threshold_percent, crossed_at_utc_ms, effective_usage_bytes)
+            VALUES (
+                @id, @ruleId, @rev, @cycle, @th, @crossedAt, @usage);
+        ";
+        cmd.Parameters.AddWithValue("@id", r.EventId);
+        cmd.Parameters.AddWithValue("@ruleId", r.RuleId);
+        cmd.Parameters.AddWithValue("@rev", r.RuleRevision);
+        cmd.Parameters.AddWithValue("@cycle", r.CycleIdentifier);
+        cmd.Parameters.AddWithValue("@th", r.ThresholdPercent);
+        cmd.Parameters.AddWithValue("@crossedAt", r.CrossedAtUtcMs);
+        cmd.Parameters.AddWithValue("@usage", r.EffectiveUsageBytes);
+        cmd.ExecuteNonQuery();
+    }
+
     public async Task<SessionRecord?> GetLastSessionAsync(CancellationToken ct = default)
     {
         using var conn = CreateConnection();
@@ -568,6 +593,280 @@ public sealed class SqliteStorageEngine : IStorageEngine
             }
         }
         return (rx, tx);
+    }
+
+    public async Task<(long? EarliestUtcMs, long? LatestUtcMs)> GetHistoryAvailabilityAsync(CancellationToken ct = default)
+    {
+        using var conn = CreateConnection();
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+        ConfigurePragmas(conn);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT MIN(start_utc_ms), MAX(end_utc_ms) FROM usage_intervals;";
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (await reader.ReadAsync(ct).ConfigureAwait(false) && !reader.IsDBNull(0) && !reader.IsDBNull(1))
+        {
+            return (reader.GetInt64(0), reader.GetInt64(1));
+        }
+
+        // Fallback to sessions if no intervals have been recorded yet
+        using var cmd2 = conn.CreateCommand();
+        cmd2.CommandText = "SELECT MIN(started_at_utc_ms), MAX(COALESCE(ended_at_utc_ms, started_at_utc_ms)) FROM collection_sessions;";
+        using var reader2 = await cmd2.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (await reader2.ReadAsync(ct).ConfigureAwait(false) && !reader2.IsDBNull(0) && !reader2.IsDBNull(1))
+        {
+            return (reader2.GetInt64(0), reader2.GetInt64(1));
+        }
+
+        return (null, null);
+    }
+
+    public async Task<HistoricalSummary> GetUsageSummaryAsync(
+        HistoricalRange range, string reportingTimezoneId, string? scopeRevisionId = null, string? networkProfileId = null, CancellationToken ct = default)
+    {
+        using var conn = CreateConnection();
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+        ConfigurePragmas(conn);
+
+        using var cmd = conn.CreateCommand();
+        var sql = @"
+            SELECT interval_id, start_utc_ms, end_utc_ms, bytes_rx, bytes_tx, is_gap
+            FROM usage_intervals
+            WHERE end_utc_ms > @rangeStart AND start_utc_ms < @rangeEnd
+        ";
+        cmd.Parameters.AddWithValue("@rangeStart", range.StartUtcMs);
+        cmd.Parameters.AddWithValue("@rangeEnd", range.EndUtcMs);
+
+        if (scopeRevisionId is not null)
+        {
+            sql += " AND scope_revision_id = @rev";
+            cmd.Parameters.AddWithValue("@rev", scopeRevisionId);
+        }
+        if (networkProfileId is not null)
+        {
+            sql += " AND network_profile_id = @net";
+            cmd.Parameters.AddWithValue("@net", networkProfileId);
+        }
+        sql += " ORDER BY start_utc_ms ASC;";
+        cmd.CommandText = sql;
+
+        long totalRx = 0;
+        long totalTx = 0;
+        long observedDurationMs = 0;
+        long missingDurationMs = 0;
+        var intervalCount = 0;
+
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            intervalCount++;
+            var startMs = reader.GetInt64(1);
+            var endMs = reader.GetInt64(2);
+            var rawRx = reader.GetInt64(3);
+            var rawTx = reader.GetInt64(4);
+            var isGap = reader.GetInt32(5) == 1;
+
+            if (isGap)
+            {
+                var gapOverlap = range.OverlapDurationMs(startMs, endMs);
+                missingDurationMs = CheckedIntegerMath.CheckedAdd(missingDurationMs, gapOverlap, "missing duration accumulation");
+            }
+            else
+            {
+                var validOverlap = range.OverlapDurationMs(startMs, endMs);
+                observedDurationMs = CheckedIntegerMath.CheckedAdd(observedDurationMs, validOverlap, "observed duration accumulation");
+
+                var (allocRx, allocTx) = IntegerSplitter.Allocate(startMs, endMs, rawRx, rawTx, range.StartUtcMs, range.EndUtcMs);
+                totalRx = CheckedIntegerMath.CheckedAdd(totalRx, allocRx, "historical summary rx");
+                totalTx = CheckedIntegerMath.CheckedAdd(totalTx, allocTx, "historical summary tx");
+            }
+        }
+
+        // Determine completeness
+        var (earliestMs, latestMs) = await GetHistoryAvailabilityAsync(ct).ConfigureAwait(false);
+        CompletenessState completeness;
+
+        if (health != StorageHealth.Healthy)
+        {
+            completeness = CompletenessState.StorageDegraded;
+        }
+        else if (!earliestMs.HasValue)
+        {
+            completeness = CompletenessState.NoCoverage;
+        }
+        else if (range.EndUtcMs <= earliestMs.Value)
+        {
+            completeness = CompletenessState.Unavailable;
+        }
+        else if (intervalCount == 0)
+        {
+            completeness = CompletenessState.NoCoverage;
+        }
+        else if (missingDurationMs == 0 && observedDurationMs >= range.DurationMs)
+        {
+            completeness = CompletenessState.Complete;
+        }
+        else
+        {
+            completeness = CompletenessState.Partial;
+        }
+
+        var observableTotal = Math.Max(1L, observedDurationMs + missingDurationMs);
+        var coverage = Math.Clamp((double)observedDurationMs / observableTotal, 0.0, 1.0);
+
+        return new HistoricalSummary(
+            range,
+            reportingTimezoneId,
+            totalRx,
+            totalTx,
+            observedDurationMs,
+            missingDurationMs,
+            coverage,
+            completeness,
+            scopeRevisionId,
+            networkProfileId,
+            IsEstimated: false);
+    }
+
+    public async Task<IReadOnlyList<UsageIntervalRecord>> GetPagedIntervalsAsync(
+        HistoricalRange range, long? cursorStartUtcMs = null, string? cursorIntervalId = null, int pageSize = 50, CancellationToken ct = default)
+    {
+        if (pageSize <= 0) pageSize = 50;
+        using var conn = CreateConnection();
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+        ConfigurePragmas(conn);
+
+        using var cmd = conn.CreateCommand();
+        var sql = @"
+            SELECT interval_id, source_interval_key, session_id, clock_segment_id, scope_revision_id, network_profile_id,
+                   start_utc_ms, end_utc_ms, monotonic_duration_ticks, bytes_rx, bytes_tx, is_coarse, is_gap, gap_reason, timing_confidence
+            FROM usage_intervals
+            WHERE end_utc_ms > @rangeStart AND start_utc_ms < @rangeEnd
+        ";
+        cmd.Parameters.AddWithValue("@rangeStart", range.StartUtcMs);
+        cmd.Parameters.AddWithValue("@rangeEnd", range.EndUtcMs);
+
+        if (cursorStartUtcMs.HasValue && !string.IsNullOrEmpty(cursorIntervalId))
+        {
+            sql += " AND (start_utc_ms > @cTime OR (start_utc_ms = @cTime AND interval_id > @cId))";
+            cmd.Parameters.AddWithValue("@cTime", cursorStartUtcMs.Value);
+            cmd.Parameters.AddWithValue("@cId", cursorIntervalId);
+        }
+
+        sql += " ORDER BY start_utc_ms ASC, interval_id ASC LIMIT @limit;";
+        cmd.Parameters.AddWithValue("@limit", pageSize);
+        cmd.CommandText = sql;
+
+        var list = new List<UsageIntervalRecord>(pageSize);
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            list.Add(new UsageIntervalRecord(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                reader.GetInt64(6),
+                reader.GetInt64(7),
+                reader.IsDBNull(8) ? null : reader.GetInt64(8),
+                reader.GetInt64(9),
+                reader.GetInt64(10),
+                reader.GetInt32(11) == 1,
+                reader.GetInt32(12) == 1,
+                reader.IsDBNull(13) ? null : reader.GetString(13),
+                reader.GetString(14)));
+        }
+        return list;
+    }
+
+    public async Task<int> ComputeDailyRollupsAsync(HistoricalRange range, string reportingTimezoneId, CancellationToken ct = default)
+    {
+        TimeZoneInfo tz;
+        try { tz = TimeZoneInfo.FindSystemTimeZoneById(reportingTimezoneId); }
+        catch { tz = TimeZoneInfo.Utc; }
+
+        var startOffset = DateTimeOffset.FromUnixTimeMilliseconds(range.StartUtcMs);
+        var endOffset = DateTimeOffset.FromUnixTimeMilliseconds(range.EndUtcMs);
+
+        var localStart = TimeZoneInfo.ConvertTime(startOffset, tz).Date;
+        var localEnd = TimeZoneInfo.ConvertTime(endOffset, tz).Date;
+
+        var count = 0;
+        for (var date = localStart; date <= localEnd; date = date.AddDays(1))
+        {
+            ct.ThrowIfCancellationRequested();
+            var dayStartUtc = new DateTimeOffset(date, tz.GetUtcOffset(date)).ToUniversalTime().ToUnixTimeMilliseconds();
+            var nextDate = date.AddDays(1);
+            var dayEndUtc = new DateTimeOffset(nextDate, tz.GetUtcOffset(nextDate)).ToUniversalTime().ToUnixTimeMilliseconds();
+
+            if (dayEndUtc <= range.StartUtcMs || dayStartUtc >= range.EndUtcMs) continue;
+
+            var dayRange = new HistoricalRange(dayStartUtc, dayEndUtc);
+            var summary = await GetUsageSummaryAsync(dayRange, reportingTimezoneId, ct: ct).ConfigureAwait(false);
+
+            if (summary.TotalBytes > 0 || summary.ObservedDurationMs > 0 || summary.MissingDurationMs > 0)
+            {
+                using var conn = CreateConnection();
+                await conn.OpenAsync(ct).ConfigureAwait(false);
+                ConfigurePragmas(conn);
+
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    INSERT OR REPLACE INTO daily_rollups (
+                        start_utc_ms, end_utc_ms, reporting_timezone, calendar_rule_revision, scope_id, network_profile_id,
+                        bytes_rx, bytes_tx, valid_duration_ms, gap_duration_ms, peak_rx_interval_id, peak_tx_interval_id
+                    ) VALUES (
+                        @start, @end, @tz, '1', 'canonical_all', 'unidentified',
+                        @rx, @tx, @validDur, @gapDur, NULL, NULL
+                    );
+                ";
+                cmd.Parameters.AddWithValue("@start", dayRange.StartUtcMs);
+                cmd.Parameters.AddWithValue("@end", dayRange.EndUtcMs);
+                cmd.Parameters.AddWithValue("@tz", reportingTimezoneId);
+                cmd.Parameters.AddWithValue("@rx", summary.BytesRx);
+                cmd.Parameters.AddWithValue("@tx", summary.BytesTx);
+                cmd.Parameters.AddWithValue("@validDur", summary.ObservedDurationMs);
+                cmd.Parameters.AddWithValue("@gapDur", summary.MissingDurationMs);
+
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public async Task RecordQuotaThresholdEventAsync(QuotaThresholdEvent record, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        await EnqueueCommandAsync(new QuotaEventCmd(record), ct).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<double>> GetRecordedThresholdsAsync(
+        string ruleId, int ruleRevision, string cycleIdentifier, CancellationToken ct = default)
+    {
+        using var conn = CreateConnection();
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+        ConfigurePragmas(conn);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT threshold_percent FROM quota_threshold_events
+            WHERE rule_id = @ruleId AND rule_revision = @rev AND cycle_identifier = @cycle
+            ORDER BY threshold_percent ASC;
+        ";
+        cmd.Parameters.AddWithValue("@ruleId", ruleId);
+        cmd.Parameters.AddWithValue("@rev", ruleRevision);
+        cmd.Parameters.AddWithValue("@cycle", cycleIdentifier);
+
+        var list = new List<double>();
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            list.Add(reader.GetDouble(0));
+        }
+        return list;
     }
 
     public async ValueTask DisposeAsync()

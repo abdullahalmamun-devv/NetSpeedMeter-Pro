@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using SpeedMeter.Core;
 
 namespace SpeedMeter.Storage;
 
@@ -22,6 +23,13 @@ public interface IStorageEngine : IAsyncDisposable, IDisposable
     Task<long?> GetLastDurableTimestampUtcMsAsync(string sessionId, CancellationToken ct = default);
     Task<IReadOnlyList<UsageIntervalRecord>> GetIntervalsAsync(string? scopeRevisionId = null, long? startUtcMs = null, long? endUtcMs = null, CancellationToken ct = default);
     Task<(long TotalRx, long TotalTx)> GetTotalBytesAsync(string? scopeRevisionId = null, long? startUtcMs = null, long? endUtcMs = null, CancellationToken ct = default);
+
+    Task<(long? EarliestUtcMs, long? LatestUtcMs)> GetHistoryAvailabilityAsync(CancellationToken ct = default);
+    Task<HistoricalSummary> GetUsageSummaryAsync(HistoricalRange range, string reportingTimezoneId, string? scopeRevisionId = null, string? networkProfileId = null, CancellationToken ct = default);
+    Task<IReadOnlyList<UsageIntervalRecord>> GetPagedIntervalsAsync(HistoricalRange range, long? cursorStartUtcMs = null, string? cursorIntervalId = null, int pageSize = 50, CancellationToken ct = default);
+    Task<int> ComputeDailyRollupsAsync(HistoricalRange range, string reportingTimezoneId, CancellationToken ct = default);
+    Task RecordQuotaThresholdEventAsync(QuotaThresholdEvent record, CancellationToken ct = default);
+    Task<IReadOnlyList<double>> GetRecordedThresholdsAsync(string ruleId, int ruleRevision, string cycleIdentifier, CancellationToken ct = default);
 
     Task FlushAsync(TimeSpan timeout, CancellationToken ct = default);
 }
