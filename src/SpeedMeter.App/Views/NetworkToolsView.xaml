@@ -3,68 +3,318 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700">
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="850">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <StackPanel Margin="28,24,28,24">
+        <StackPanel Margin="28,24,28,32">
 
             <!-- Page Header -->
             <DockPanel Margin="0,0,0,20">
                 <StackPanel>
                     <TextBlock Text="Network Tools" FontSize="{StaticResource FontSizeHero}" FontWeight="SemiBold" />
-                    <TextBlock Text="Passive interface diagnostics, link topology and reachability status" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeBodySmall}" Margin="0,4,0,0" />
+                    <TextBlock Text="Interface metadata, reachability status, and diagnostic tools"
+                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeBodySmall}" Margin="0,4,0,0" />
                 </StackPanel>
             </DockPanel>
 
-            <!-- Network Details Card -->
-            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="24" Margin="0,0,0,20">
+            <!-- 1. Connection & Reachability Status Card (3 Independent Axes) -->
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                    CornerRadius="{StaticResource PanelCornerRadius}" Padding="24" Margin="0,0,0,20">
                 <StackPanel>
-                    <TextBlock Text="Passive Network Information" FontSize="{StaticResource FontSizeSubheading}" FontWeight="SemiBold" Margin="0,0,0,14" />
+                    <DockPanel Margin="0,0,0,16">
+                        <TextBlock Text="Connection &amp; Reachability Status" FontSize="{StaticResource FontSizeSubheading}" FontWeight="SemiBold" />
+                    </DockPanel>
+
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Collector Axis -->
+                        <Border Grid.Column="0" Background="{StaticResource PanelElevatedBrush}" BorderBrush="{StaticResource BorderSubtleBrush}"
+                                BorderThickness="1" CornerRadius="{StaticResource ControlCornerRadius}" Padding="14,12" Margin="0,0,8,0">
+                            <StackPanel>
+                                <TextBlock Text="COLLECTOR STATE" FontSize="{StaticResource FontSizeCaption}" Foreground="{StaticResource MutedBrush}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding CollectorStateText}" FontSize="{StaticResource FontSizeHeading}" FontWeight="Bold" Margin="0,4,0,0" />
+                                <TextBlock Text="Kernel MIB byte polling" FontSize="{StaticResource FontSizeCaption}" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Connectivity Axis -->
+                        <Border Grid.Column="1" Background="{StaticResource PanelElevatedBrush}" BorderBrush="{StaticResource BorderSubtleBrush}"
+                                BorderThickness="1" CornerRadius="{StaticResource ControlCornerRadius}" Padding="14,12" Margin="4,0,4,0">
+                            <StackPanel>
+                                <TextBlock Text="CONNECTIVITY AXIS" FontSize="{StaticResource FontSizeCaption}" Foreground="{StaticResource MutedBrush}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding ConnectivityStateText}" FontSize="{StaticResource FontSizeSubheading}" FontWeight="Bold"
+                                           Foreground="{StaticResource AccentBrush}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding LastCheckText, StringFormat='Last check: {0}'}" FontSize="{StaticResource FontSizeCaption}"
+                                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Quality Axis -->
+                        <Border Grid.Column="2" Background="{StaticResource PanelElevatedBrush}" BorderBrush="{StaticResource BorderSubtleBrush}"
+                                BorderThickness="1" CornerRadius="{StaticResource ControlCornerRadius}" Padding="14,12" Margin="8,0,0,0">
+                            <StackPanel>
+                                <TextBlock Text="QUALITY AXIS" FontSize="{StaticResource FontSizeCaption}" Foreground="{StaticResource MutedBrush}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding QualityStateText}" FontSize="{StaticResource FontSizeHeading}" FontWeight="Bold" Margin="0,4,0,0" />
+                                <TextBlock Text="ICMP / HTTPS observations" FontSize="{StaticResource FontSizeCaption}" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- Incident Notice (if any) -->
+                    <Border Background="#2D2214" BorderBrush="{StaticResource StatusWarningBrush}" BorderThickness="1"
+                            CornerRadius="{StaticResource ControlCornerRadius}" Padding="12,8" Margin="0,0,0,16"
+                            Visibility="{Binding IncidentNotice, Converter={x:Null}}">
+                        <TextBlock Text="{Binding IncidentNotice}" Foreground="{StaticResource StatusWarningBrush}" FontSize="{StaticResource FontSizeBodySmall}" FontWeight="SemiBold" />
+                    </Border>
+
+                    <!-- Configuration Options -->
+                    <StackPanel>
+                        <CheckBox Content="Enable periodic background reachability checks"
+                                  IsChecked="{Binding RemoteChecksEnabled, Mode=TwoWay}"
+                                  FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4" />
+                        <TextBlock Text="Sends lightweight HTTPS requests every 30 seconds to verified endpoints (Microsoft NCSI). Local-first by default."
+                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeCaption}" Margin="20,0,0,8" />
+
+                        <CheckBox Content="Allow reachability checks on metered networks"
+                                  IsChecked="{Binding MeteredChecksAllowed, Mode=TwoWay}"
+                                  IsEnabled="{Binding RemoteChecksEnabled}"
+                                  Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4" />
+                        <TextBlock Text="When disabled, background checks are automatically suppressed on metered connections to avoid data charges."
+                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeCaption}" Margin="20,0,0,0" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- 2. Passive Network Information Card -->
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                    CornerRadius="{StaticResource PanelCornerRadius}" Padding="24" Margin="0,0,0,20">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,16">
+                        <Button DockPanel.Dock="Right" Content="Refresh Details" Command="{Binding RefreshDetailsCommand}"
+                                Padding="12,6" FontSize="{StaticResource FontSizeBodySmall}" />
+                        <TextBlock Text="Passive Network Information" FontSize="{StaticResource FontSizeSubheading}" FontWeight="SemiBold" />
+                    </DockPanel>
 
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="180" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="10" />
+                            <RowDefinition Height="8" />
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="10" />
+                            <RowDefinition Height="8" />
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="10" />
+                            <RowDefinition Height="8" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="8" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="8" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="8" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="8" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="8" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="8" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="8" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Measurement Source:" Foreground="{StaticResource TextSecondaryBrush}" />
-                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Win32 GetIfTable2 (Kernel MIB interface table)" FontWeight="SemiBold" />
+                        <!-- Adapter Name -->
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Adapter Name:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding AdapterName}" FontWeight="SemiBold" />
+                        <Button Grid.Row="0" Grid.Column="2" Content="Copy" Command="{Binding CopyDetailCommand}" CommandParameter="{Binding AdapterName}" Padding="6,2" FontSize="11" />
 
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Route Provider:" Foreground="{StaticResource TextSecondaryBrush}" />
-                        <TextBlock Grid.Row="2" Grid.Column="1" Text="Dual-Stack IPv4 / IPv6 with 3.0s Flap Debounce" FontWeight="SemiBold" />
+                        <!-- Interface Type -->
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Interface Type:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding InterfaceType}" FontWeight="SemiBold" />
 
-                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Privacy Boundary:" Foreground="{StaticResource TextSecondaryBrush}" />
-                        <TextBlock Grid.Row="4" Grid.Column="1" Text="Local-first. No public IP lookup or cloud telemetry transmitted." FontWeight="SemiBold" Foreground="{StaticResource StatusSuccessBrush}" />
+                        <!-- Operational State -->
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Operational State:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding OperationalState}" FontWeight="SemiBold" Foreground="{StaticResource StatusSuccessBrush}" />
 
-                        <TextBlock Grid.Row="6" Grid.Column="0" Text="VPN Accounting Policy:" Foreground="{StaticResource TextSecondaryBrush}" />
-                        <TextBlock Grid.Row="6" Grid.Column="1" Text="Strict isolation. Virtual tunnel bytes never added to physical transport." FontWeight="SemiBold" />
+                        <!-- IPv4 Address -->
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="IPv4 Address:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Ipv4Address}" FontWeight="SemiBold" />
+                        <Button Grid.Row="6" Grid.Column="2" Content="Copy" Command="{Binding CopyDetailCommand}" CommandParameter="{Binding Ipv4Address}" Padding="6,2" FontSize="11" />
+
+                        <!-- IPv6 Address -->
+                        <TextBlock Grid.Row="8" Grid.Column="0" Text="IPv6 Address:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding Ipv6Address}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <Button Grid.Row="8" Grid.Column="2" Content="Copy" Command="{Binding CopyDetailCommand}" CommandParameter="{Binding Ipv6Address}" Padding="6,2" FontSize="11" />
+
+                        <!-- Default Gateway -->
+                        <TextBlock Grid.Row="10" Grid.Column="0" Text="Default Gateway:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding DefaultGateway}" FontWeight="SemiBold" />
+                        <Button Grid.Row="10" Grid.Column="2" Content="Copy" Command="{Binding CopyDetailCommand}" CommandParameter="{Binding DefaultGateway}" Padding="6,2" FontSize="11" />
+
+                        <!-- DNS Servers -->
+                        <TextBlock Grid.Row="12" Grid.Column="0" Text="DNS Servers:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Grid.Row="12" Grid.Column="1" Text="{Binding DnsServers}" FontWeight="SemiBold" />
+                        <Button Grid.Row="12" Grid.Column="2" Content="Copy" Command="{Binding CopyDetailCommand}" CommandParameter="{Binding DnsServers}" Padding="6,2" FontSize="11" />
+
+                        <!-- MAC Address -->
+                        <TextBlock Grid.Row="14" Grid.Column="0" Text="MAC Address:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Grid.Row="14" Grid.Column="1" Text="{Binding MacAddress}" FontWeight="SemiBold" />
+                        <Button Grid.Row="14" Grid.Column="2" Content="Copy" Command="{Binding CopyDetailCommand}" CommandParameter="{Binding MacAddress}" Padding="6,2" FontSize="11" />
+
+                        <!-- Link Speed (truthfully labeled) -->
+                        <TextBlock Grid.Row="16" Grid.Column="0" Text="Interface Link Speed:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <StackPanel Grid.Row="16" Grid.Column="1">
+                            <TextBlock Text="{Binding LinkSpeedText}" FontWeight="SemiBold" />
+                            <TextBlock Text="Directional values are interface link speed, not internet speed"
+                                       FontSize="{StaticResource FontSizeCaption}" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0" />
+                        </StackPanel>
+
+                        <!-- Wi-Fi Network / SSID -->
+                        <TextBlock Grid.Row="18" Grid.Column="0" Text="Wi-Fi Network (SSID):" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <TextBlock Grid.Row="18" Grid.Column="1" Text="{Binding WifiSsid}" FontWeight="SemiBold" />
+                        <Button Grid.Row="18" Grid.Column="2" Content="Copy" Command="{Binding CopyDetailCommand}" CommandParameter="{Binding WifiSsid}" Padding="6,2" FontSize="11" />
+
+                        <!-- Wi-Fi Radio & Signal -->
+                        <TextBlock Grid.Row="20" Grid.Column="0" Text="Wi-Fi Signal &amp; Channel:" Foreground="{StaticResource TextSecondaryBrush}" />
+                        <StackPanel Grid.Row="20" Grid.Column="1" Orientation="Horizontal">
+                            <TextBlock Text="Signal: " Foreground="{StaticResource TextSecondaryBrush}" />
+                            <TextBlock Text="{Binding WifiSignal}" FontWeight="SemiBold" Margin="0,0,12,0" />
+                            <TextBlock Text="Band: " Foreground="{StaticResource TextSecondaryBrush}" />
+                            <TextBlock Text="{Binding WifiBand}" FontWeight="SemiBold" Margin="0,0,12,0" />
+                            <TextBlock Text="Channel: " Foreground="{StaticResource TextSecondaryBrush}" />
+                            <TextBlock Text="{Binding WifiChannel}" FontWeight="SemiBold" Margin="0,0,12,0" />
+                            <TextBlock Text="Security: " Foreground="{StaticResource TextSecondaryBrush}" />
+                            <TextBlock Text="{Binding WifiAuth}" FontWeight="SemiBold" />
+                        </StackPanel>
                     </Grid>
+
+                    <Separator Margin="0,16,0,12" Background="{StaticResource BorderSubtleBrush}" />
+
+                    <!-- Wi-Fi Limitation Disclosure -->
+                    <TextBlock Text="{Binding WifiNotice}" FontSize="{StaticResource FontSizeCaption}" Foreground="{StaticResource MutedBrush}" />
                 </StackPanel>
             </Border>
 
-            <!-- Active Probes Policy Card -->
-            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="24" Margin="0,0,0,20">
-                <StackPanel>
-                    <DockPanel Margin="0,0,0,12">
-                        <Border Background="#243750" CornerRadius="4" Padding="6,2" DockPanel.Dock="Right">
-                            <TextBlock Text="LOCAL ONLY" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AccentBrush}" />
+            <!-- 3. Interactive Diagnostic Tools Grid -->
+            <Grid Margin="0,0,0,20">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Ping Tool Card -->
+                <Border Grid.Column="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="20">
+                    <StackPanel>
+                        <TextBlock Text="Ping Benchmark" FontSize="{StaticResource FontSizeSubheading}" FontWeight="SemiBold" Margin="0,0,0,12" />
+
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="80" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0" Text="{Binding PingTarget, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" />
+                            <TextBox Grid.Column="1" Text="{Binding PingCount, UpdateSourceTrigger=PropertyChanged}" ToolTip="Count (1..10)" />
+                        </Grid>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <Button Content="Run Ping" Command="{Binding RunPingCommand}" IsEnabled="{Binding IsPinging, Converter={x:Null}}" />
+                            <Button Content="Cancel" Command="{Binding CancelPingCommand}" />
+                        </StackPanel>
+
+                        <!-- Ping Attempts List -->
+                        <Border Background="{StaticResource PanelElevatedBrush}" BorderBrush="{StaticResource BorderSubtleBrush}"
+                                BorderThickness="1" CornerRadius="{StaticResource ControlCornerRadius}" Height="120" Padding="8" Margin="0,0,0,10">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding PingAttempts}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <DockPanel Margin="0,2">
+                                                <TextBlock Text="{Binding Rtt}" DockPanel.Dock="Right" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
+                                                <TextBlock Text="{Binding AttemptNumber, StringFormat='#{0}: '}" Foreground="{StaticResource TextSecondaryBrush}" />
+                                                <TextBlock Text="{Binding Status}" />
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
                         </Border>
-                        <TextBlock Text="Active Probes &amp; Speed Test" FontSize="{StaticResource FontSizeSubheading}" FontWeight="SemiBold" />
+
+                        <TextBlock Text="{Binding PingSummary}" FontSize="{StaticResource FontSizeCaption}" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <!-- DNS Lookup Tool Card -->
+                <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="20">
+                    <StackPanel>
+                        <TextBlock Text="DNS Resolution" FontSize="{StaticResource FontSizeSubheading}" FontWeight="SemiBold" Margin="0,0,0,12" />
+
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="80" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0" Text="{Binding DnsTarget, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" />
+                            <ComboBox Grid.Column="1" SelectedValue="{Binding DnsRecordType, Mode=TwoWay}" SelectedValuePath="Content">
+                                <ComboBoxItem Content="A" IsSelected="True" />
+                                <ComboBoxItem Content="AAAA" />
+                            </ComboBox>
+                        </Grid>
+
+                        <Button Content="Resolve DNS" Command="{Binding RunDnsCommand}" HorizontalAlignment="Left" Margin="0,0,0,12" />
+
+                        <Border Background="{StaticResource PanelElevatedBrush}" BorderBrush="{StaticResource BorderSubtleBrush}"
+                                BorderThickness="1" CornerRadius="{StaticResource ControlCornerRadius}" Height="120" Padding="8" Margin="0,0,0,10">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <TextBlock Text="{Binding DnsResultsText}" TextWrapping="Wrap" FontFamily="Consolas, monospace" />
+                            </ScrollViewer>
+                        </Border>
+
+                        <TextBlock Text="{Binding DnsDiagnosticText}" FontSize="{StaticResource FontSizeCaption}" Foreground="{StaticResource TextSecondaryBrush}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- 4. Manual Public IP Lookup Card (With Required Privacy Disclosure) -->
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                    CornerRadius="{StaticResource PanelCornerRadius}" Padding="24">
+                <StackPanel>
+                    <TextBlock Text="Manual Public IP Lookup" FontSize="{StaticResource FontSizeSubheading}" FontWeight="SemiBold" Margin="0,0,0,10" />
+
+                    <!-- Required Disclosure -->
+                    <Border Background="{StaticResource PanelElevatedBrush}" BorderBrush="{StaticResource BorderSubtleBrush}"
+                            BorderThickness="1" CornerRadius="{StaticResource ControlCornerRadius}" Padding="14,10" Margin="0,0,0,14">
+                        <StackPanel>
+                            <TextBlock Text="PRIVACY DISCLOSURE" FontSize="{StaticResource FontSizeCaption}" FontWeight="Bold" Foreground="{StaticResource StatusWarningBrush}" Margin="0,0,0,4" />
+                            <TextBlock Text="This lookup contacts an external service, which can see the source IP used to reach it."
+                                       Foreground="{StaticResource TextPrimaryBrush}" FontSize="{StaticResource FontSizeBodySmall}" FontWeight="SemiBold" />
+                            <TextBlock Text="SpeedMeter Pro performs this lookup ONLY upon manual request. No automated IP lookups are performed."
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeCaption}" Margin="0,4,0,8" />
+                            <CheckBox Content="I understand and accept this external request"
+                                      IsChecked="{Binding PublicIpDisclosureAccepted, Mode=TwoWay}"
+                                      FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" />
+                        </StackPanel>
+                    </Border>
+
+                    <DockPanel Margin="0,0,0,12">
+                        <Button DockPanel.Dock="Left" Content="Look Up Public IP" Command="{Binding RunPublicIpCommand}"
+                                IsEnabled="{Binding PublicIpDisclosureAccepted}" Margin="0,0,16,0" />
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="{Binding PublicIpText}" FontSize="{StaticResource FontSizeHeading}" FontWeight="Bold" Foreground="{StaticResource AccentBrush}" />
+                            <TextBlock Text="{Binding PublicIpQueriedAtText}" FontSize="{StaticResource FontSizeCaption}" Foreground="{StaticResource TextSecondaryBrush}" />
+                        </StackPanel>
                     </DockPanel>
 
-                    <TextBlock Text="In accordance with Section 12.2 and Section 24.2 of the PRD, SpeedMeter Pro does not execute automated background pings, HTTP reachability requests, or bandwidth tests without explicit user consent. No unsolicited network packets are generated during monitoring."
-                               TextWrapping="Wrap" LineHeight="20" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,12" />
-
-                    <TextBlock Text="Built-in speed test and multi-target ICMP latency benchmarks are scheduled for subsequent gated extensions with documented endpoint registries."
-                               FontSize="{StaticResource FontSizeBodySmall}" Foreground="{StaticResource MutedBrush}" />
+                    <!-- Egress Caveat -->
+                    <TextBlock Text="{Binding PublicIpCaveat}" FontSize="{StaticResource FontSizeCaption}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 

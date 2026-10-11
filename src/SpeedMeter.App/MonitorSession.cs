@@ -8,6 +8,8 @@ namespace SpeedMeter.App;
 public sealed class MonitorSession : IDisposable
 {
     private readonly ApplicationContext context;
+    private readonly INetworkDetailsProvider networkDetailsProvider;
+    private readonly INetworkToolsService networkToolsService;
 
     public Collector Collector => context.Collector;
     public CollectorSnapshot Latest => context.Collector.Latest;
@@ -17,6 +19,11 @@ public sealed class MonitorSession : IDisposable
     public ISettingsService SettingsService => context.SettingsService;
     public ILiveGraphService LiveGraphService => context.LiveGraphService;
     public IExportService ExportService => context.ExportService;
+    public IConfigExportImportService ConfigExportImportService => context.ConfigExportImportService;
+    public AlertService AlertService => context.AlertService;
+    public ConnectivityService ConnectivityService => context.ConnectivityService;
+    public INetworkDetailsProvider NetworkDetailsProvider => networkDetailsProvider;
+    public INetworkToolsService NetworkToolsService => networkToolsService;
 
     public MonitorSession(string? dbPath = null, string? settingsPath = null)
     {
@@ -28,6 +35,8 @@ public sealed class MonitorSession : IDisposable
             routeProvider,
             dbPath: dbPath,
             settingsPath: settingsPath);
+        networkDetailsProvider = new NetworkDetailsProvider();
+        networkToolsService = new NetworkToolsService(networkDetailsProvider);
     }
 
     public double Interval

@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private readonly QuickPanelWindow quickPanel;
     private readonly MainViewModel viewModel;
     private readonly QuickPanelViewModel quickPanelVm;
+    private readonly HotkeyHelper hotkeyHelper;
     private readonly string? smokeDirectory;
     private Reading? last;
     private string inventoryKey = "";
@@ -70,7 +71,8 @@ public partial class MainWindow : Window
             monitor.Collector,
             monitor.HistoryService,
             monitor.SettingsService,
-            openDashboardAction: OpenDashboard);
+            openDashboardAction: OpenDashboard,
+            connectivityService: monitor.ConnectivityService);
 
         quickPanel = new QuickPanelWindow(quickPanelVm);
 
@@ -78,6 +80,15 @@ public partial class MainWindow : Window
         LiveTrafficViewControl.DataContext = viewModel.LiveTraffic;
         HistoryViewControl.DataContext = viewModel.History;
         SettingsViewControl.DataContext = viewModel.Settings;
+        NetworkToolsViewControl.DataContext = viewModel.NetworkTools;
+
+        hotkeyHelper = new HotkeyHelper(this, OpenDashboard, () => { if (widget.IsVisible) widget.Hide(); else widget.Show(); }, DisableWidgetClickThrough);
+        widget.LayoutChanged += layout =>
+        {
+            var s = monitor.SettingsService.CurrentSettings;
+            s.WidgetLayout = layout;
+            monitor.SettingsService.Save(s);
+        };
 
         // Tray Setup (exposing typed and semantic identifier for click-through recovery)
         tray = new Forms.NotifyIcon { Icon = System.Drawing.SystemIcons.Application, Text = "SpeedMeter Pro · starting", Visible = true };
@@ -98,15 +109,15 @@ public partial class MainWindow : Window
         tray.ContextMenuStrip = menu;
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(OpenDashboard);
 
+        displayTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        displayTimer.Tick += (_, _) => PollSnapshot();
+
         // Subscribe to dynamic settings changes
         monitor.SettingsService.SettingsChanged += OnSettingsChanged;
         if (smokeDirectory is null)
         {
             ApplySettings(monitor.SettingsService.CurrentSettings);
         }
-
-        displayTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
-        displayTimer.Tick += (_, _) => PollSnapshot();
 
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
         SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
@@ -185,6 +196,17 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (smokeDirectory is null && !monitor.SettingsService.CurrentSettings.FirstRunCompleted)
+        {
+            var firstRun = new FirstRunWindow(monitor.SettingsService.CurrentSettings, s =>
+            {
+                monitor.SettingsService.Save(s);
+                ApplySettings(s);
+            });
+            firstRun.Owner = this;
+            firstRun.ShowDialog();
+        }
+
         await RefreshInventoryAsync();
         if (smokeDirectory is not null && AdapterPicker.Items.Count > 0) AdapterPicker.SelectedIndex = 0;
         monitor.Start();
@@ -665,6 +687,17 @@ public partial class MainWindow : Window
 
         widget.Opacity = settings.WidgetOpacity;
         widget.Topmost = settings.WidgetTopmost;
+        widget.SetLayout(settings.WidgetLayout);
+        widget.IdleDimmingEnabled = settings.IdleDimmingEnabled;
+        widget.FullscreenAutoHideEnabled = settings.FullscreenAutoHideEnabled;
+        ThemeManager.ApplyTheme(settings.Theme);
+
+        var isLowResource = settings.LowResourceMode ||
+            (Forms.SystemInformation.PowerStatus.PowerLineStatus == Forms.PowerLineStatus.Offline);
+        displayTimer.Interval = isLowResource
+            ? TimeSpan.FromMilliseconds(1000)
+            : TimeSpan.FromMilliseconds(250);
+
         if (widget.IsClickThrough != settings.ClickThrough)
         {
             try { widget.SetClickThrough(settings.ClickThrough); } catch { }
@@ -725,6 +758,7 @@ public partial class MainWindow : Window
         monitor.SettingsService.SettingsChanged -= OnSettingsChanged;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
+        hotkeyHelper?.Dispose();
         monitor.Dispose();
         tray.Visible = false;
         tray.Dispose();

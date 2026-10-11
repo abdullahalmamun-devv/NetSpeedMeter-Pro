@@ -34,6 +34,8 @@ public interface IUsageHistoryService
         CancellationToken ct = default);
 
     Task<(long? EarliestUtcMs, long? LatestUtcMs)> GetAvailabilityAsync(CancellationToken ct = default);
+    Task<int> PruneHistoryAsync(long beforeUtcMs, CancellationToken ct = default) => Task.FromResult(0);
+    Task ClearAllHistoryAsync(CancellationToken ct = default) => Task.CompletedTask;
 }
 
 public sealed class UsageHistoryService : IUsageHistoryService
@@ -44,6 +46,12 @@ public sealed class UsageHistoryService : IUsageHistoryService
     {
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
     }
+
+    public Task<int> PruneHistoryAsync(long beforeUtcMs, CancellationToken ct = default) =>
+        storage.PruneHistoryAsync(beforeUtcMs, ct);
+
+    public Task ClearAllHistoryAsync(CancellationToken ct = default) =>
+        storage.ClearAllHistoryAsync(ct);
 
     public Task<HistoricalSummary> GetPeriodSummaryAsync(
         QueryPeriodType period,

@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted with limits for V1.0 code integration after Director, Architect, and QA review. The V1 clock/shutdown product gate remains blocked by the evidence and invariant limits below.
+Accepted with limits for V1.0 code integration after Director, Architect, and QA review. The subsequent V1 Wave 4 product-authority handoff resolves the repeated-UTC acceptance conflict as described below. Hardware and shutdown evidence remain pending for the public release gate, not Wave 4 development.
+
+## Product-authority clarification for Wave 4
+
+Valid accounting intervals must remain ordered and non-overlapping **within one continuous clock segment**. After an explicitly detected backward wall-clock discontinuity, distinct clock segments may contain repeated UTC labels. This is acceptable only when the discontinuity and new segment are recorded, no counter delta crosses the boundary, measured bytes are not duplicated, monotonic duration is retained where observed, affected queries are `ClockUncertain`, coverage unions repeated labels, and the UI suppresses false precision. This supersedes the earlier interpretation requiring globally disjoint UTC labels. It does not claim that real hardware sleep, clock changes, Windows 11, or whole-application shutdown have been validated.
 
 ## Context
 

@@ -12,6 +12,7 @@ public sealed class OverviewViewModel : ViewModelBase
     private readonly IQuotaService quotaService;
     private readonly ISettingsService settingsService;
     private readonly Collector collector;
+    private readonly ConnectivityService? connectivityService;
 
     private string downloadRateText = "—";
     private string uploadRateText = "—";
@@ -19,6 +20,7 @@ public sealed class OverviewViewModel : ViewModelBase
     private string sessionTxText = "Session: 0 B";
     private string scopeText = "Resolving scope…";
     private string collectorStateText = "Starting";
+    private string connectivityPillText = "Local-Only";
     private bool isDegraded;
     private string? degradedReason;
     private bool isBits;
@@ -45,6 +47,7 @@ public sealed class OverviewViewModel : ViewModelBase
     public string SessionTxText { get => sessionTxText; private set => SetProperty(ref sessionTxText, value); }
     public string ScopeText { get => scopeText; private set => SetProperty(ref scopeText, value); }
     public string CollectorStateText { get => collectorStateText; private set => SetProperty(ref collectorStateText, value); }
+    public string ConnectivityPillText { get => connectivityPillText; private set => SetProperty(ref connectivityPillText, value); }
     public bool IsDegraded { get => isDegraded; private set => SetProperty(ref isDegraded, value); }
     public string? DegradedReason { get => degradedReason; private set => SetProperty(ref degradedReason, value); }
     public bool IsBits { get => isBits; set { if (SetProperty(ref isBits, value)) RefreshRateDisplay(); } }
@@ -68,12 +71,14 @@ public sealed class OverviewViewModel : ViewModelBase
         IUsageHistoryService historyService,
         IQuotaService quotaService,
         ISettingsService settingsService,
-        Collector collector)
+        Collector collector,
+        ConnectivityService? connectivityService = null)
     {
         this.historyService = historyService ?? throw new ArgumentNullException(nameof(historyService));
         this.quotaService = quotaService ?? throw new ArgumentNullException(nameof(quotaService));
         this.settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
         this.collector = collector ?? throw new ArgumentNullException(nameof(collector));
+        this.connectivityService = connectivityService;
 
         isBits = settingsService.CurrentSettings.DisplayUnits == "Mbps";
     }
@@ -82,6 +87,23 @@ public sealed class OverviewViewModel : ViewModelBase
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         latestReading = snapshot.Reading;
+
+        if (connectivityService is not null && settingsService.CurrentSettings.ConnectionChecksEnabled)
+        {
+            var snap = connectivityService.Snapshot;
+            ConnectivityPillText = snap.State switch
+            {
+                ConnectivityState.Reachable => "Reachable",
+                ConnectivityState.Limited => "Checks Failing",
+                ConnectivityState.NoLocalConnection => "No Local Link",
+                ConnectivityState.SignInSuspected => "Portal Sign-In",
+                _ => "Checking…"
+            };
+        }
+        else
+        {
+            ConnectivityPillText = "Local-Only";
+        }
 
         CollectorStateText = snapshot.State.ToString();
         IsDegraded = snapshot.State == CollectorState.Degraded;

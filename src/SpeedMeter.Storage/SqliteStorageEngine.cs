@@ -10,7 +10,7 @@ using SpeedMeter.Core;
 
 namespace SpeedMeter.Storage;
 
-public sealed class SqliteStorageEngine : IStorageEngine
+public sealed class SqliteStorageEngine : IStorageEngine, IWave4EventStore
 {
     private interface IStorageCommand { }
 
@@ -23,7 +23,12 @@ public sealed class SqliteStorageEngine : IStorageEngine
     private sealed record IntervalCmd(UsageIntervalRecord Record, CounterCheckpointRecord? Checkpoint = null) : IStorageCommand;
     private sealed record GapCmd(UsageIntervalRecord Record) : IStorageCommand;
     private sealed record QuotaEventCmd(QuotaThresholdEvent Record) : IStorageCommand;
+    private sealed record ConnectivityEventCmd(ConnectivityEventRecord Record, TaskCompletionSource<bool> Tcs) : IStorageCommand;
+    private sealed record AlertCasCmd(string Key, long ExpectedVersion, AlertIncidentState NextState, AlertEvent Event, TaskCompletionSource<bool> Tcs) : IStorageCommand;
+    private sealed record QuotaAlertCmd(AlertEvent Event, TaskCompletionSource<bool> Tcs) : IStorageCommand;
     private sealed record FlushCmd(TaskCompletionSource<bool> Tcs) : IStorageCommand;
+    private sealed record PruneHistoryCmd(long BeforeUtcMs, TaskCompletionSource<int> Tcs) : IStorageCommand;
+    private sealed record ClearHistoryCmd(TaskCompletionSource<bool> Tcs) : IStorageCommand;
 
     private readonly string connectionString;
     private readonly int channelCapacity;
@@ -158,6 +163,49 @@ public sealed class SqliteStorageEngine : IStorageEngine
         await EnqueueCommandAsync(new GapCmd(gap), ct).ConfigureAwait(false);
     }
 
+    public async Task RecordConnectivityEventAsync(ConnectivityEventRecord record, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await EnqueueCommandAsync(new ConnectivityEventCmd(record, completion), ct).ConfigureAwait(false);
+        await completion.Task.WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> TryCommitAlertAsync(string key, long expectedVersion, AlertIncidentState nextState, AlertEvent alertEvent, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(nextState);
+        ArgumentNullException.ThrowIfNull(alertEvent);
+        if (key != nextState.Key || nextState.Version != checked(expectedVersion + 1))
+            throw new ArgumentException("Alert state key/version mismatch.", nameof(nextState));
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await EnqueueCommandAsync(new AlertCasCmd(key, expectedVersion, nextState, alertEvent, completion), ct).ConfigureAwait(false);
+        return await completion.Task.WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> TryRecordQuotaAlertAsync(AlertEvent alertEvent, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(alertEvent);
+        if (alertEvent.Kind != AlertKind.QuotaThreshold) throw new ArgumentException("Quota alert kind required.", nameof(alertEvent));
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await EnqueueCommandAsync(new QuotaAlertCmd(alertEvent, completion), ct).ConfigureAwait(false);
+        return await completion.Task.WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<int> PruneHistoryAsync(long beforeUtcMs, CancellationToken ct = default)
+    {
+        var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await EnqueueCommandAsync(new PruneHistoryCmd(beforeUtcMs, tcs), ct).ConfigureAwait(false);
+        return await tcs.Task.WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task ClearAllHistoryAsync(CancellationToken ct = default)
+    {
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await EnqueueCommandAsync(new ClearHistoryCmd(tcs), ct).ConfigureAwait(false);
+        await tcs.Task.WaitAsync(ct).ConfigureAwait(false);
+    }
+
     private async ValueTask EnqueueCommandAsync(IStorageCommand cmd, CancellationToken ct)
     {
         if (disposed) throw new ObjectDisposedException(nameof(SqliteStorageEngine));
@@ -246,6 +294,10 @@ public sealed class SqliteStorageEngine : IStorageEngine
             {
                 using var tx = conn.BeginTransaction();
                 var flushCompletions = new List<TaskCompletionSource<bool>>();
+                var durableCompletions = new List<TaskCompletionSource<bool>>();
+                var alertResults = new List<(TaskCompletionSource<bool> Completion, bool Committed)>();
+                var pruneResults = new List<(TaskCompletionSource<int> Completion, int Count)>();
+                var clearCompletions = new List<TaskCompletionSource<bool>>();
                 var committedIntervals = 0;
                 var committedGaps = 0;
                 var committedCheckpoints = 0;
@@ -286,6 +338,25 @@ public sealed class SqliteStorageEngine : IStorageEngine
                         case QuotaEventCmd qe:
                             ExecuteQuotaEvent(conn, tx, qe.Record);
                             break;
+                        case ConnectivityEventCmd ce:
+                            ExecuteConnectivityEvent(conn, tx, ce.Record);
+                            durableCompletions.Add(ce.Tcs);
+                            break;
+                        case AlertCasCmd ac:
+                            var committed = ExecuteAlertCas(conn, tx, ac.Key, ac.ExpectedVersion, ac.NextState, ac.Event);
+                            alertResults.Add((ac.Tcs, committed));
+                            break;
+                        case QuotaAlertCmd qa:
+                            alertResults.Add((qa.Tcs, ExecuteAlertEvent(conn, tx, qa.Event) > 0));
+                            break;
+                        case PruneHistoryCmd prune:
+                            var deleted = ExecutePruneHistory(conn, tx, prune.BeforeUtcMs);
+                            pruneResults.Add((prune.Tcs, deleted));
+                            break;
+                        case ClearHistoryCmd clear:
+                            ExecuteClearHistory(conn, tx);
+                            clearCompletions.Add(clear.Tcs);
+                            break;
                         case FlushCmd flush:
                             flushCompletions.Add(flush.Tcs);
                             break;
@@ -301,6 +372,10 @@ public sealed class SqliteStorageEngine : IStorageEngine
                 {
                     f.TrySetResult(true);
                 }
+                foreach (var completion in durableCompletions) completion.TrySetResult(true);
+                foreach (var result in alertResults) result.Completion.TrySetResult(result.Committed);
+                foreach (var (tcs, count) in pruneResults) tcs.TrySetResult(count);
+                foreach (var c in clearCompletions) c.TrySetResult(true);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
@@ -310,6 +385,11 @@ public sealed class SqliteStorageEngine : IStorageEngine
                 foreach (var cmd in batch)
                 {
                     if (cmd is FlushCmd f) f.Tcs.TrySetException(ex);
+                    if (cmd is ConnectivityEventCmd ce) ce.Tcs.TrySetException(ex);
+                    if (cmd is AlertCasCmd ac) ac.Tcs.TrySetException(ex);
+                    if (cmd is QuotaAlertCmd qa) qa.Tcs.TrySetException(ex);
+                    if (cmd is PruneHistoryCmd pr) pr.Tcs.TrySetException(ex);
+                    if (cmd is ClearHistoryCmd cl) cl.Tcs.TrySetException(ex);
                 }
             }
         }
@@ -992,6 +1072,172 @@ public sealed class SqliteStorageEngine : IStorageEngine
             list.Add(reader.GetInt32(0));
         }
         return list;
+    }
+
+    public async Task<IReadOnlyList<ConnectivityEventRecord>> GetConnectivityEventsAsync(long startUtcMs, long endUtcMs, int limit = 500, CancellationToken ct = default)
+    {
+        if (endUtcMs <= startUtcMs) throw new ArgumentOutOfRangeException(nameof(endUtcMs));
+        if (limit is < 1 or > 5000) throw new ArgumentOutOfRangeException(nameof(limit));
+        using var conn = CreateConnection();
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+        ConfigurePragmas(conn);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT event_id,event_type,evidence_source,scope_id,network_profile_id,state,observed_at_utc_ms,confirmed_at_utc_ms,certainty,detail FROM connectivity_events WHERE observed_at_utc_ms >= @start AND observed_at_utc_ms < @end ORDER BY observed_at_utc_ms,event_id LIMIT @limit;";
+        cmd.Parameters.AddWithValue("@start", startUtcMs);
+        cmd.Parameters.AddWithValue("@end", endUtcMs);
+        cmd.Parameters.AddWithValue("@limit", limit);
+        var events = new List<ConnectivityEventRecord>();
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            events.Add(new ConnectivityEventRecord(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(5), reader.GetInt64(6), reader.IsDBNull(7) ? null : reader.GetInt64(7), reader.GetString(8), reader.IsDBNull(9) ? null : reader.GetString(9)));
+        }
+        return events;
+    }
+
+    public async Task<AlertIncidentState?> GetAlertStateAsync(string key, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        using var conn = CreateConnection();
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+        ConfigurePragmas(conn);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT state_key,version,active_incident_id,active_rule_revision,last_trigger_utc_ms,next_incident_number FROM alert_rule_state WHERE state_key=@key;";
+        cmd.Parameters.AddWithValue("@key", key);
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false)) return null;
+        return new AlertIncidentState(reader.GetString(0), reader.GetInt64(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetInt32(3), reader.GetInt64(4), reader.GetInt64(5));
+    }
+
+    public async Task<IReadOnlyList<AlertEvent>> GetAlertEventsAsync(long startUtcMs, long endUtcMs, int limit = 500, CancellationToken ct = default)
+    {
+        if (endUtcMs <= startUtcMs) throw new ArgumentOutOfRangeException(nameof(endUtcMs));
+        if (limit is < 1 or > 5000) throw new ArgumentOutOfRangeException(nameof(limit));
+        using var conn = CreateConnection();
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+        ConfigurePragmas(conn);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT event_id,incident_id,rule_id,rule_revision,alert_kind,phase,scope_id,network_id,observed_at_utc_ms,observed_metric,evidence_description,suppress_popup FROM alert_events WHERE observed_at_utc_ms >= @start AND observed_at_utc_ms < @end ORDER BY observed_at_utc_ms,event_id LIMIT @limit;";
+        cmd.Parameters.AddWithValue("@start", startUtcMs);
+        cmd.Parameters.AddWithValue("@end", endUtcMs);
+        cmd.Parameters.AddWithValue("@limit", limit);
+        var events = new List<AlertEvent>();
+        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            events.Add(new AlertEvent(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3), Enum.Parse<AlertKind>(reader.GetString(4)), Enum.Parse<AlertEventPhase>(reader.GetString(5)), reader.GetString(6), reader.GetString(7), reader.GetInt64(8), reader.IsDBNull(9) ? null : reader.GetDouble(9), reader.GetString(10), reader.GetInt64(11) != 0));
+        }
+        return events;
+    }
+
+    private static void ExecuteConnectivityEvent(SqliteConnection conn, SqliteTransaction tx, ConnectivityEventRecord record)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "INSERT INTO connectivity_events(event_id,event_type,evidence_source,scope_id,network_profile_id,state,observed_at_utc_ms,confirmed_at_utc_ms,certainty,detail) VALUES(@id,@type,@source,@scope,@profile,@state,@observed,@confirmed,@certainty,@detail) ON CONFLICT(event_id) DO NOTHING;";
+        cmd.Parameters.AddWithValue("@id", record.EventId);
+        cmd.Parameters.AddWithValue("@type", record.EventType);
+        cmd.Parameters.AddWithValue("@source", record.EvidenceSource);
+        cmd.Parameters.AddWithValue("@scope", (object?)record.ScopeId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@profile", (object?)record.NetworkProfileId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@state", record.State);
+        cmd.Parameters.AddWithValue("@observed", record.ObservedAtUtcMs);
+        cmd.Parameters.AddWithValue("@confirmed", (object?)record.ConfirmedAtUtcMs ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@certainty", record.Certainty);
+        cmd.Parameters.AddWithValue("@detail", (object?)record.Detail ?? DBNull.Value);
+        cmd.ExecuteNonQuery();
+    }
+
+    private static bool ExecuteAlertCas(SqliteConnection conn, SqliteTransaction tx, string key, long expectedVersion, AlertIncidentState nextState, AlertEvent alertEvent)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        if (expectedVersion == 0)
+        {
+            cmd.CommandText = "INSERT INTO alert_rule_state(state_key,version,active_incident_id,active_rule_revision,last_trigger_utc_ms,next_incident_number) VALUES(@key,@version,@active,@revision,@last,@next) ON CONFLICT(state_key) DO NOTHING;";
+        }
+        else
+        {
+            cmd.CommandText = "UPDATE alert_rule_state SET version=@version,active_incident_id=@active,active_rule_revision=@revision,last_trigger_utc_ms=@last,next_incident_number=@next WHERE state_key=@key AND version=@expected;";
+            cmd.Parameters.AddWithValue("@expected", expectedVersion);
+        }
+        cmd.Parameters.AddWithValue("@key", key);
+        cmd.Parameters.AddWithValue("@version", nextState.Version);
+        cmd.Parameters.AddWithValue("@active", (object?)nextState.ActiveIncidentId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@revision", nextState.ActiveRuleRevision);
+        cmd.Parameters.AddWithValue("@last", nextState.LastTriggerUtcMs);
+        cmd.Parameters.AddWithValue("@next", nextState.NextIncidentNumber);
+        if (cmd.ExecuteNonQuery() == 0) return false;
+        if (ExecuteAlertEvent(conn, tx, alertEvent) == 0) throw new InvalidOperationException("Alert CAS committed without a unique event.");
+        return true;
+    }
+
+    private static int ExecuteAlertEvent(SqliteConnection conn, SqliteTransaction tx, AlertEvent alertEvent)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "INSERT INTO alert_events(event_id,incident_id,rule_id,rule_revision,alert_kind,phase,scope_id,network_id,observed_at_utc_ms,observed_metric,evidence_description,suppress_popup) VALUES(@id,@incident,@rule,@revision,@kind,@phase,@scope,@network,@at,@metric,@evidence,@suppress) ON CONFLICT(event_id) DO NOTHING;";
+        cmd.Parameters.AddWithValue("@id", alertEvent.EventId);
+        cmd.Parameters.AddWithValue("@incident", alertEvent.IncidentId);
+        cmd.Parameters.AddWithValue("@rule", alertEvent.RuleId);
+        cmd.Parameters.AddWithValue("@revision", alertEvent.RuleRevision);
+        cmd.Parameters.AddWithValue("@kind", alertEvent.Kind.ToString());
+        cmd.Parameters.AddWithValue("@phase", alertEvent.Phase.ToString());
+        cmd.Parameters.AddWithValue("@scope", alertEvent.ScopeId);
+        cmd.Parameters.AddWithValue("@network", alertEvent.NetworkId);
+        cmd.Parameters.AddWithValue("@at", alertEvent.ObservedUtcMs);
+        cmd.Parameters.AddWithValue("@metric", (object?)alertEvent.ObservedMetric ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@evidence", alertEvent.EvidenceDescription);
+        cmd.Parameters.AddWithValue("@suppress", alertEvent.SuppressPopup ? 1 : 0);
+        return cmd.ExecuteNonQuery();
+    }
+
+    private static int ExecutePruneHistory(SqliteConnection conn, SqliteTransaction tx, long beforeUtcMs)
+    {
+        if (beforeUtcMs <= 0) throw new ArgumentOutOfRangeException(nameof(beforeUtcMs), "Prune cutoff timestamp must be positive.");
+        var totalDeleted = 0;
+
+        using var cmd1 = conn.CreateCommand();
+        cmd1.Transaction = tx;
+        cmd1.CommandText = "DELETE FROM usage_intervals WHERE end_utc_ms <= @before;";
+        cmd1.Parameters.AddWithValue("@before", beforeUtcMs);
+        totalDeleted += cmd1.ExecuteNonQuery();
+
+        using var cmd2 = conn.CreateCommand();
+        cmd2.Transaction = tx;
+        cmd2.CommandText = "DELETE FROM daily_rollups WHERE end_utc_ms <= @before;";
+        cmd2.Parameters.AddWithValue("@before", beforeUtcMs);
+        totalDeleted += cmd2.ExecuteNonQuery();
+
+        using var cmd3 = conn.CreateCommand();
+        cmd3.Transaction = tx;
+        cmd3.CommandText = "DELETE FROM connectivity_events WHERE observed_at_utc_ms <= @before;";
+        cmd3.Parameters.AddWithValue("@before", beforeUtcMs);
+        totalDeleted += cmd3.ExecuteNonQuery();
+
+        using var cmd4 = conn.CreateCommand();
+        cmd4.Transaction = tx;
+        cmd4.CommandText = "DELETE FROM alert_events WHERE observed_at_utc_ms <= @before;";
+        cmd4.Parameters.AddWithValue("@before", beforeUtcMs);
+        totalDeleted += cmd4.ExecuteNonQuery();
+
+        return totalDeleted;
+    }
+
+    private static void ExecuteClearHistory(SqliteConnection conn, SqliteTransaction tx)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"
+            DELETE FROM usage_intervals;
+            DELETE FROM daily_rollups;
+            DELETE FROM connectivity_events;
+            DELETE FROM alert_events;
+            DELETE FROM alert_rule_state;
+            DELETE FROM counter_checkpoints;
+            DELETE FROM quota_threshold_events;
+        ";
+        cmd.ExecuteNonQuery();
     }
 
     public async ValueTask DisposeAsync()

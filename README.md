@@ -2,9 +2,9 @@
 
 A high-performance, truthful Windows desktop network telemetry, accounting, and visualization application, engineered strictly from `Premium-Speed-Meter-PRD.md`.
 
-**Status: V1.0 clock and shutdown truth gate blocked · Wave 4 blocked.** Gate A, B, and C work remains integrated. The clock and shutdown repairs pass deterministic checks, but the final gate needs the evidence listed in `PROJECT_BOARD.md`.
+**Status: V1.0 Wave 4 complete; Gate D formally passed.** Gate A, B, C, and D work remain integrated. The Wave 4 product-authority decision accepts repeated UTC labels across recorded clock segments under the byte and uncertainty safeguards in ADR-011. Real sleep, live clock transitions, Windows 11, and whole-app shutdown evidence remain designated as public release-gate work.
 
-The executable Windows fixture run passed 197 checks, with 1 intentional skip and 0 failures. The post-change native WPF smoke passed all 18 assertions on Windows 10 x64. These results do not validate real hardware sleep or Windows 11.
+The executable Windows fixture run passed 235 checks, with 1 intentional skip and 0 failures (228 passed in standard `check.ps1`). The post-change native WPF smoke passed all 18 assertions on Windows 10 x64. These results do not validate real hardware sleep or Windows 11.
 
 ---
 

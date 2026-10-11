@@ -31,5 +31,8 @@ public interface IStorageEngine : IAsyncDisposable, IDisposable
     Task RecordQuotaThresholdEventAsync(QuotaThresholdEvent record, CancellationToken ct = default);
     Task<IReadOnlyList<int>> GetRecordedThresholdsAsync(string ruleId, int ruleRevision, string cycleIdentifier, CancellationToken ct = default);
 
+    Task<int> PruneHistoryAsync(long beforeUtcMs, CancellationToken ct = default) => Task.FromResult(0);
+    Task ClearAllHistoryAsync(CancellationToken ct = default) => Task.CompletedTask;
+
     Task FlushAsync(TimeSpan timeout, CancellationToken ct = default);
 }

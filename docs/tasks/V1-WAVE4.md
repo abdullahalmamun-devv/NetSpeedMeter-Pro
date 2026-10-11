@@ -1,0 +1,13 @@
+# V1 Wave 4 engineering assignments
+
+**Release:** V1.0 development. **Director:** Project Director. **Gate:** D1 connectivity, D2 alerts and tools, then Gate D. No release engineering starts before Gate D.
+
+| Task | Owner | Reviewer | PRD / acceptance | Dependencies | Scope and owned files | Acceptance and tests | Handoff |
+|---|---|---|---|---|---|---|---|
+| V1-CONNECT-001 / V1-PROBE-001 | Connectivity Domain / Probe Engineer | Director, QA, Privacy | §12, §20; AC-C01–C07 | ADR-011, canonical scope contract | New `ConnectivityDomain.cs`, `ConnectivityService.cs`, `ConnectivityFixtures.cs` | Passive/active axes separate; optional bounded checks, hysteresis, staleness, pause/sleep closure, no external test traffic | `docs/handoffs/V1-WAVE4.md` |
+| V1-NETINFO-001 / V1-TOOLS-001 | Windows Network Information / Tool Engineer | Director, QA, Privacy | §16; AC-D01–D07 | scope identity; request disclosure | New `NetworkDetailsProvider.cs`, `NetworkToolsService.cs`, `NetworkToolsFixtures.cs` | Native details truthful; manual bounded ping/DNS/public IP; cancellation, request inventory, fake-I/O tests | `docs/handoffs/V1-WAVE4.md` |
+| V1-ALERT-001 | Alert Domain Engineer | Director, QA, Privacy | §15; AC-N01–N07 | connectivity and quota event contracts | New `AlertDomain.cs`, `AlertService.cs`, `AlertFixtures.cs` | Typed valid-observation incidents, cooldown, quiet hours, restart dedup and V1 high-ping mean; independent fixtures | `docs/handoffs/V1-WAVE4.md` |
+| V1-W4-INTEGRATION-001 / V1-FIRST-RUN-001 / V1-SETTINGS-COMPLETE-001 / V1-DATA-CONTROLS-001 | Project Director / Product UI | QA, Accessibility, Privacy | §16, §20, §22, §27; AC-C/AC-D/AC-N/AC-U | reviewed service contracts and D1 before UI polish | Existing composition, settings, storage, WPF surfaces, migrations, docs | Real services wired; consent reversible; no unsolicited requests; migrations and retention safe; UI/native smoke; explicit remaining Must audit | `docs/handoffs/V1-WAVE4.md` |
+| V1-W4-QA-001 | Independent QA / Director | Director | §27; Gate D | integrated workstreams | Fixture registration and regression evidence | Release build, executable Windows checks, WPF smoke, privacy, fault, accessibility and performance evidence; record PASS/FAIL/SKIP/environment pending | `docs/reviews/V1-WAVE4.md` |
+
+The three specialist workstreams own only new source and fixture files. The Director owns shared composition, existing files, integration, migration coordination, documentation and gate decisions. Shared contracts are reviewed before dependent edits. No row is Done until independently reviewed evidence is recorded.

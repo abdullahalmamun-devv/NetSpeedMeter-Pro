@@ -11,12 +11,14 @@ public sealed class QuickPanelViewModel : ViewModelBase
     private readonly Collector collector;
     private readonly IUsageHistoryService historyService;
     private readonly ISettingsService settingsService;
+    private readonly ConnectivityService? connectivityService;
     private readonly Action openDashboardAction;
 
     private string downloadRateText = "—";
     private string uploadRateText = "—";
     private string todayUsageText = "Today: 0 B";
     private string scopeText = "Scope: —";
+    private string connectivityText = "Local-Only";
     private bool isPaused;
     private bool isBits;
 
@@ -24,6 +26,7 @@ public sealed class QuickPanelViewModel : ViewModelBase
     public string UploadRateText { get => uploadRateText; private set => SetProperty(ref uploadRateText, value); }
     public string TodayUsageText { get => todayUsageText; private set => SetProperty(ref todayUsageText, value); }
     public string ScopeText { get => scopeText; private set => SetProperty(ref scopeText, value); }
+    public string ConnectivityText { get => connectivityText; private set => SetProperty(ref connectivityText, value); }
     public bool IsPaused { get => isPaused; private set => SetProperty(ref isPaused, value); }
 
     public ICommand TogglePauseCommand { get; }
@@ -33,12 +36,14 @@ public sealed class QuickPanelViewModel : ViewModelBase
         Collector collector,
         IUsageHistoryService historyService,
         ISettingsService settingsService,
-        Action openDashboardAction)
+        Action openDashboardAction,
+        ConnectivityService? connectivityService = null)
     {
         this.collector = collector ?? throw new ArgumentNullException(nameof(collector));
         this.historyService = historyService ?? throw new ArgumentNullException(nameof(historyService));
         this.settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
         this.openDashboardAction = openDashboardAction ?? throw new ArgumentNullException(nameof(openDashboardAction));
+        this.connectivityService = connectivityService;
 
         isBits = settingsService.CurrentSettings.DisplayUnits == "Mbps";
         isPaused = collector.Paused;
@@ -56,6 +61,23 @@ public sealed class QuickPanelViewModel : ViewModelBase
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         IsPaused = collector.Paused;
+
+        if (connectivityService is not null && settingsService.CurrentSettings.ConnectionChecksEnabled)
+        {
+            var snap = connectivityService.Snapshot;
+            ConnectivityText = snap.State switch
+            {
+                ConnectivityState.Reachable => "Reachable",
+                ConnectivityState.Limited => "Checks Failing",
+                ConnectivityState.NoLocalConnection => "No Local Link",
+                ConnectivityState.SignInSuspected => "Portal Sign-In",
+                _ => "Checking…"
+            };
+        }
+        else
+        {
+            ConnectivityText = "Local-Only";
+        }
 
         var reading = snapshot.Reading;
         if (reading.State == ReadingState.Live)

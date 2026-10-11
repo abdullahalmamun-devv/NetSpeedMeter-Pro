@@ -14,6 +14,9 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
     private readonly ISettingsService settingsService;
     private readonly ILiveGraphService liveGraphService;
     private readonly IExportService exportService;
+    private readonly IConfigExportImportService configExportImportService;
+    private readonly AlertService alertService;
+    private readonly ConnectivityService connectivityService;
     private bool disposed;
 
     public Collector Collector => collector;
@@ -24,6 +27,9 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
     public ISettingsService SettingsService => settingsService;
     public ILiveGraphService LiveGraphService => liveGraphService;
     public IExportService ExportService => exportService;
+    public IConfigExportImportService ConfigExportImportService => configExportImportService;
+    public AlertService AlertService => alertService;
+    public ConnectivityService ConnectivityService => connectivityService;
 
     public static string GetDefaultDataDirectory()
     {
@@ -64,16 +70,41 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
         this.quotaService = new QuotaService(this.storage);
         this.liveGraphService = new LiveGraphService(capacitySeconds: 3600);
         this.exportService = new ExportService(this.historyService);
+        this.configExportImportService = new ConfigExportImportService();
+
+        IAlertStateStore alertStore = this.storage is SqliteStorageEngine sqlite
+            ? new StorageAlertStateStore(sqlite)
+            : new InMemoryAlertStateStore();
+        this.alertService = new AlertService(alertStore);
+
+        var endpoints = new[]
+        {
+            new ConnectivityEndpoint(
+                "msft-ncsi",
+                "Microsoft NCSI",
+                ProbeProtocol.Https,
+                "https://www.msftconnecttest.com/connecttest.txt",
+                200,
+                TimeSpan.FromSeconds(3),
+                TimeSpan.FromSeconds(30),
+                "Microsoft Windows Network Connectivity Status Indicator service")
+        };
+        var registry = new ConnectivityEndpointRegistry(endpoints);
+        this.connectivityService = new ConnectivityService(registry, new HttpsConnectivityProbeProvider());
 
         var effectiveClock = clock ?? new MeasurementClock();
         this.collector = new Collector(provider, effectiveClock, routeProvider, this.storage);
 
-        // Synchronize collector interval with persisted settings
+        // Synchronize collector interval and connectivity with persisted settings
         var initialSettings = this.settingsService.CurrentSettings;
         if (initialSettings.SampleIntervalSeconds > 0)
         {
             this.collector.Interval = initialSettings.SampleIntervalSeconds;
         }
+        this.connectivityService.SetConfiguration(
+            initialSettings.ConnectionChecksEnabled,
+            initialSettings.MeteredProbesAllowed);
+
         this.settingsService.SettingsChanged += OnSettingsChanged;
 
         // Feed live graph buffer on every collector tick
@@ -86,6 +117,9 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
         {
             collector.Interval = settings.SampleIntervalSeconds;
         }
+        connectivityService.SetConfiguration(
+            settings.ConnectionChecksEnabled,
+            settings.MeteredProbesAllowed);
     }
 
     private void OnCollectorUpdated(CollectorSnapshot snapshot)
@@ -110,6 +144,7 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
 
         settingsService.SettingsChanged -= OnSettingsChanged;
         collector.Updated -= OnCollectorUpdated;
+        connectivityService.Dispose();
         collector.Dispose();
         storage.Dispose();
     }
@@ -121,6 +156,7 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
 
         settingsService.SettingsChanged -= OnSettingsChanged;
         collector.Updated -= OnCollectorUpdated;
+        connectivityService.Dispose();
         collector.Dispose();
         await storage.DisposeAsync().ConfigureAwait(false);
     }

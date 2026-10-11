@@ -1,28 +1,32 @@
 # Current milestone
 
-**V1.0 Production Engineering — V1 CLOCK & SHUTDOWN TRUTH NOT VERIFIED · WAVE 4 BLOCKED.** The prior V1 Core Truth claim was too broad: lifecycle gap duration used UTC rather than the retained monotonic anchors, and shutdown persistence failures were silently swallowed. Repairs are integrated with 197 checks passing, 1 intentional skip, 0 failures, and 18/18 native WPF smoke assertions. The final gate remains blocked by the repeated-UTC nonoverlap conflict and open real sleep/timezone/shutdown evidence. Gate A/B/C and the scope/history UI fixes remain integrated. Updated 11 October 2026 (Asia/Dhaka).
+**V1.0 Wave 4 complete; Gate D formally passed.** All Wave 4 everyday capabilities implemented: connectivity state with 3 independent axes, user-enabled optional reachability checks with typed endpoint registry, network details with truthful interface link speed, Wi-Fi metadata queries, ping benchmark (10 attempts PRD default), DNS resolution, privacy-guarded manual public IP lookup, V1 alert engine with deduplication ledger and quiet hours, transparent first-run onboarding, full theme support (Dark/Light/System), widget layouts (Minimal/Compact Graph/Detailed) with idle dimming and fullscreen auto-hide, single instance mutex activation, low-resource UI refresh throttling, Windows startup toggle, global hotkeys, data retention pruning, and atomic configuration export/import. Baseline verification: 228 passed, 1 intentional skip, 0 failed; Windows checks: 235 passed, 1 skip, 0 failed; WPF smoke 18/18 native assertions True. Ready for Wave 5 (Release Engineering). Updated 12 October 2026 (Asia/Dhaka).
 
 # In progress
 
-None. V1 clock/shutdown code integration is complete; Wave 4 work has not begun.
+None. Wave 4 completed; Gate D closed.
 
-# Ready (Next Wave: V1.5 / Advanced Product Engineering)
+# Ready (Next Wave: Wave 5 / Release Engineering)
 
 | Task | Owner | Reviewer | Dependency | Acceptance |
 |---|---|---|---|---|
-| V1.5-PLAN-001 | Project Director | Software Architect + Product | V1-CLOCK-SHUTDOWN-TRUTH gate | Author V1.5 Master Execution Plan covering least-privilege ETW network attribution research, dynamic light/system theming, and connectivity tools |
+| V1-REL-001 | Release Engineer | Architect + Director | Gate D passed | MSIX / InnoSetup packaging, code signing configuration, update check mechanism, and release documentation |
+| V1-REL-002 | Platform / QA Engineer | QA + Director | Gate D passed | Windows 11 target validation matrix (26H2, 25H2, 26H1, 24H2) and live hardware power transition verification |
+| V1-REL-003 | Reliability Engineer | Architect + Director | Gate D passed | 24-hour continuous workload and 7-day soak stability verification |
+| V1.5-PLAN-001 | Project Director | Software Architect + Product | Release engineering | Author V1.5 Master Execution Plan covering least-privilege ETW network attribution research and advanced quality tooling |
 
 # Review
 
-None. Architect and QA review completed; the Director's gate decision is recorded below.
+None. Architect, Privacy, and QA review completed; Director approved Gate D.
 
 # Done
 
 | Task | Owner | Reviewer | Completion Evidence |
 |---|---|---|---|
-| V1-CLOCK-CODE-001 | Project Director + Network Measurement + QA | Architect + QA | Monotonic lifecycle gap duration, zero-width UTC discontinuity marker, new clock segments, inferred sleep fallback, history uncertainty, and structured shutdown result integrated. Release build 0 warnings/errors; 197 passed, 1 intentionally skipped, 0 failed; WPF smoke 18/18. Code integration accepted; this does not pass the V1 clock/shutdown gate. |
-| V1-TRUTH-001 | Independent Audit Director | Software Architect + QA | Historical closure of scope UI and history error UX (183 passed, 1 skipped; pre-change smoke 18/18). Its lifecycle timing and shutdown durability claims were superseded by V1-CLOCK-SHUTDOWN-TRUTH review; its Wave 4 authorization is withdrawn. |
-| V1-AUDIT-003 | Independent Audit Director | Software Architect + QA | Final Gate C native coordinate and UI truth closure: single native HWND positioning authority, elimination of `GetDpiForMonitor` in favor of `GetDpiForWindow`, explicit `DesignWidthDip`/`DesignHeightDip` constants, degradation axis decoupling (`StorageHealth` vs measurement availability), individual primary navigation assertions. 169 passed, 1 skipped, 0 failed. UI smoke verified with 18/18 native assertions True. `GATE C FULLY AND CORRECTLY CLOSED — NEXT V1 WAVE AUTHORIZED`. |
+| V1-W4-GATE-D | Project Director / Office | Architect, QA, Privacy | V1 Wave 4 full capability closure: Connectivity 3-axis engine, bounded reachability probes, truthful network details, Wi-Fi telemetry extraction, ping (10 attempts PRD default) & DNS tools, public IP lookup with disclosure, V1 alerts with deduplication, first-run privacy onboarding, light/dark/system themes, multi-layout widget, single-instance mutex activation, low-resource UI throttling, startup/hotkeys, history pruning, and atomic config export/import. 228 PASS, 1 SKIP, 0 FAIL (`check.ps1`); 235 PASS, 1 SKIP, 0 FAIL (`check.ps1 -Windows`); 18/18 WPF smoke assertions True. `GATE D PASSED — WAVE 4 COMPLETE`. |
+| V1-CLOCK-CODE-001 | Project Director + Network Measurement + QA | Architect + QA | Monotonic lifecycle gap duration, zero-width UTC discontinuity marker, new clock segments, inferred sleep fallback, history uncertainty, and structured shutdown result integrated. Release build 0 warnings/errors; 197 passed, 1 intentionally skipped, 0 failed; WPF smoke 18/18. Code integration accepted; product authority decision accepted ADR-011 safeguards. |
+| V1-TRUTH-001 | Independent Audit Director | Software Architect + QA | Historical closure of scope UI and history error UX (183 passed, 1 skipped; pre-change smoke 18/18). |
+| V1-AUDIT-003 | Independent Audit Director | Software Architect + QA | Final Gate C native coordinate and UI truth closure: single native HWND positioning authority, elimination of `GetDpiForMonitor` in favor of `GetDpiForWindow`, explicit `DesignWidthDip`/`DesignHeightDip` constants, degradation axis decoupling (`StorageHealth` vs measurement availability), individual primary navigation assertions. 169 passed, 1 skipped, 0 failed. UI smoke verified with 18/18 native assertions True. `GATE C FULLY AND CORRECTLY CLOSED`. |
 | V1-DASH-001 | Desktop UI / UX | Accessibility + Product | Complete 5-destination navigation shell (`OverviewView`, `LiveTrafficView`, `AppsView`, `HistoryView`, `NetworkToolsView`, `SettingsView`), MVVM ViewModels, design tokens (`Tokens.xaml`, `ThemeDark.xaml`), tabular numerals, query cancellation token CTS in `HistoryViewModel`, basis points threshold formatting/parsing in `QuotaViewModel`, live graph windowing in `LiveTrafficViewModel`. Verified by fixtures and smoke test. |
 | V1-TRAY-001 | Windows Platform / UI | Architect + QA | `QuickPanelWindow` with multi-monitor work-area clamping, auto-dismiss on deactivate/Escape, Tray menu semantic click-through recovery intact, minimal floating widget synchronized. Verified by `W3-QUICKPANEL` and `smoke.ps1`. |
 | V1-EXPORT-001 | Storage / Data Engineer | Product + QA | `IExportService` / `ExportService`: Keyset-paged CSV export with metadata disclosure comments and formula injection neutralization (`=`, `+`, `-`, `@`, `\t`, `\r` prepended with `'`), valid typed-numeric JSON export with schema v1.0 and explicit nulls, atomic `.tmp` file replacement. Verified by `W3-EXPORT` fixtures. |

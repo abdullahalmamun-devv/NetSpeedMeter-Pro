@@ -42,6 +42,7 @@ public sealed class MainViewModel : ViewModelBase
     public HistoryViewModel History { get; }
     public QuotaViewModel Quota { get; }
     public SettingsViewModel Settings { get; }
+    public NetworkToolsViewModel NetworkTools { get; }
 
     public ICommand NavigateCommand { get; }
     public ICommand TogglePauseCommand { get; }
@@ -57,11 +58,12 @@ public sealed class MainViewModel : ViewModelBase
         this.showWidgetAction = showWidgetAction ?? throw new ArgumentNullException(nameof(showWidgetAction));
         this.openQuickPanelAction = openQuickPanelAction ?? throw new ArgumentNullException(nameof(openQuickPanelAction));
 
-        Overview = new OverviewViewModel(monitor.HistoryService, monitor.QuotaService, monitor.SettingsService, monitor.Collector);
+        Overview = new OverviewViewModel(monitor.HistoryService, monitor.QuotaService, monitor.SettingsService, monitor.Collector, monitor.ConnectivityService);
         LiveTraffic = new LiveTrafficViewModel(monitor.LiveGraphService, monitor.Collector);
         History = new HistoryViewModel(monitor.HistoryService, monitor.SettingsService, monitor.ExportService);
         Quota = new QuotaViewModel(monitor.QuotaService, monitor.SettingsService);
-        Settings = new SettingsViewModel(monitor.SettingsService);
+        Settings = new SettingsViewModel(monitor.SettingsService, monitor.HistoryService, monitor.ConfigExportImportService);
+        NetworkTools = new NetworkToolsViewModel(monitor.NetworkToolsService, monitor.ConnectivityService, monitor.SettingsService, monitor.Collector);
 
         NavigateCommand = new RelayCommand(p =>
         {
@@ -97,6 +99,7 @@ public sealed class MainViewModel : ViewModelBase
 
         Overview.UpdateSnapshot(snapshot);
         LiveTraffic.UpdateSnapshot(snapshot);
+        NetworkTools.UpdateSnapshot(snapshot);
     }
 
     private void OnDestinationChanged(string destination)
@@ -111,6 +114,9 @@ public sealed class MainViewModel : ViewModelBase
                 break;
             case "Quota":
                 _ = Quota.RefreshEvaluationAsync();
+                break;
+            case "NetworkTools":
+                NetworkTools.RefreshNetworkDetails();
                 break;
             case "Settings":
                 Settings.LoadCurrent();

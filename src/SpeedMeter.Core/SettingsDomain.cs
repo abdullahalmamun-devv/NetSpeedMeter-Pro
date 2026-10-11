@@ -79,6 +79,30 @@ public sealed class SpeedMeterSettings
     [JsonPropertyName("connectionChecksEnabled")]
     public bool ConnectionChecksEnabled { get; set; } = false;
 
+    [JsonPropertyName("meteredProbesAllowed")]
+    public bool MeteredProbesAllowed { get; set; } = false;
+
+    [JsonPropertyName("publicIpDisclosureAccepted")]
+    public bool PublicIpDisclosureAccepted { get; set; } = false;
+
+    [JsonPropertyName("widgetLayout")]
+    public string WidgetLayout { get; set; } = "Minimal";
+
+    [JsonPropertyName("firstRunCompleted")]
+    public bool FirstRunCompleted { get; set; } = false;
+
+    [JsonPropertyName("idleDimmingEnabled")]
+    public bool IdleDimmingEnabled { get; set; } = false;
+
+    [JsonPropertyName("fullscreenAutoHideEnabled")]
+    public bool FullscreenAutoHideEnabled { get; set; } = true;
+
+    [JsonPropertyName("hotkeysEnabled")]
+    public bool HotkeysEnabled { get; set; } = true;
+
+    [JsonPropertyName("dataRetentionDays")]
+    public int DataRetentionDays { get; set; } = 0;
+
     [JsonPropertyName("activeQuotaRule")]
     public QuotaRule? ActiveQuotaRule { get; set; }
 
@@ -88,6 +112,21 @@ public sealed class SpeedMeterSettings
     public void Sanitize()
     {
         if (SchemaVersion <= 0) SchemaVersion = CurrentSchemaVersion;
+
+        // Theme bounds
+        if (Theme != "Dark" && Theme != "Light" && Theme != "System")
+        {
+            Theme = "Dark";
+        }
+
+        // Widget layout bounds
+        if (WidgetLayout != "Minimal" && WidgetLayout != "CompactGraph" && WidgetLayout != "Detailed")
+        {
+            WidgetLayout = "Minimal";
+        }
+
+        // Data retention days bounds (0 = indefinite, up to 10 years)
+        DataRetentionDays = Math.Clamp(DataRetentionDays, 0, 3650);
 
         // Display unit bounds
         if (DisplayUnits != "Mbps" && DisplayUnits != "MB/s" && DisplayUnits != "Auto")

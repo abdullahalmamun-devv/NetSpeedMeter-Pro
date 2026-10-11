@@ -1,44 +1,34 @@
 # Implementation status
 
 **Current release:** 0.1.0 development prototype; no GA release.  
-**Current milestone:** V1.0 Production Engineering — clock/shutdown truth gate not verified; Wave 4 blocked.
-**Updated:** 11 October 2026 (Asia/Dhaka).
+**Current milestone:** V1.0 Wave 4 complete; Gate D formally passed. Ready for Wave 5: Release Engineering. The Wave 4 product-authority decision accepts repeated UTC labels across distinct recorded clock segments under the ADR-011 safeguards. Real sleep/clock/Windows 11 and whole-app shutdown evidence remain release-gate pending.
+**Updated:** 12 October 2026 (Asia/Dhaka).
 
 ## Build / test status
 
 - **Build:** Succeeded with 0 warnings, 0 errors across 6 projects (`Core`, `Windows`, `Storage`, `Application`, `App`, `Checks`) using .NET 10 SDK 10.0.401.
-- **Fixtures:** 197 passed, 1 intentional skip, 0 failed via `scripts/check.ps1 -Windows` with process-local `NuGetAudit=false`. Without that override, restore is environment-blocked by the unreachable NuGet advisory index (`NU1900`). The executable runner also passed directly after offline restore. Counts below include the original groups plus 14 new clock/shutdown checks:
+- **Fixtures:** 228 passed, 1 intentional skip, 0 failed via `scripts/check.ps1`; 235 passed, 1 skip, 0 failed via `scripts/check.ps1 -Windows` with process-local `NuGetAudit=false`. Total evaluated: 236. Groups include:
   - 14 baseline arithmetic and boundary checks
   - 21 epoch, large counter, and delta discontinuity fixtures (including mandatory 125 MB / 10s = 12.5 MB/s and 100 Mbps)
   - 7 application collector lifecycle and resilience fixtures
   - 11 scope engine, transition, metric priority, and fail-closed aggregate fixtures
   - 6 taskbar companion geometry and fallback fixtures
   - 3 application attribution ProcessIdentity and NotMeasured capability fixtures
-  - 12 independent audit regression fixtures in `AuditFixtures.cs` (throwing/slow observers, latest coalescing, callback dispose, typed degradation, defensive copy, and past snapshot immutability)
-  - 10 Windows audit regression fixtures in `WindowsAuditFixtures.cs` (WS-01/02/03/07/10 fail-closed scope rules, duplicate identity rejection, and immutable membership)
-  - 10 V1 Foundation Wave 1 fixtures in `V1FoundationFixtures.cs` (AutoPrimary, ScopeStabilizer, BLOB codecs, checked math, rollup uniqueness, crash gaps, degradation resilience)
-  - 10 V1 Foundation Gate A forensic audit fixtures in `V1FoundationFixtures.cs` (zero overlap crash gaps, child process restart, FailFast recovery, degraded storage snapshot, queue saturation)
-  - 28 V1 Wave 2 & Gate B audit fixtures in `V1Wave2Fixtures.cs` (IntegerSplitter Int128 conservation, calendar/billing cycle day 31 clamping, Lord Howe Island 30m DST, half-open boundaries, coverage denominator, quota basis points deduplication, bounded live graph buffer, atomic settings persistence)
+  - 12 independent audit regression fixtures in `AuditFixtures.cs`
+  - 10 Windows audit regression fixtures in `WindowsAuditFixtures.cs`
+  - 10 V1 Foundation Wave 1 fixtures in `V1FoundationFixtures.cs`
+  - 10 V1 Foundation Gate A forensic audit fixtures in `V1FoundationFixtures.cs`
+  - 28 V1 Wave 2 & Gate B audit fixtures in `V1Wave2Fixtures.cs`
   - 21 V1 Wave 3 & Gate C closure fixtures in `V1Wave3Fixtures.cs`
-  - 14 V1 Core Truth closure fixtures in `V1CoreTruthFixtures.cs`:
-    - `W3-SCOPE-AUTO-START`: Startup with AutoPrimary retains AutoPrimary and selects Automatic (Recommended)
-    - `W3-SCOPE-REFRESH-STABILITY`: Inventory refresh preserves active scope, revision, and boundary without rebaseline
-    - `W3-SCOPE-SELECTED-MISSING`: Missing selected adapter preserves selection identity without fallback
-    - `W3-SCOPE-SELECTED-RETURN`: Returning selected adapter resumes selection without fallback
-    - `W3-SCOPE-PROGRAMMATIC-GUARD`: Programmatic list updates do not fire user selection events
-    - `W3-HIST-ERROR-TRUTH`: History query failure displays truthful unavailable state without stale numbers
-    - `W3-QUOTA-ERROR-TRUTH`: Quota evaluation failure displays truthful unavailable state
-    - `W3-HIST-QUERY-RECOVERY`: Subsequent successful query restores valid numbers after failure
-    - `W3-HIST-STALE-GENERATION`: Out-of-order slow query return cannot overwrite newer query state
-    - `W3-LIFECYCLE-PAUSE-GAP-DURATION`: Collector pause and resume gap duration represents actual elapsed time
-    - `W3-LIFECYCLE-PAUSE-DISPOSE-GAP`: Collector dispose while paused persists gap up to shutdown time
-    - `W3-LIFECYCLE-SLEEP-GAP-DURATION`: System suspend and resume records actual elapsed sleep span
-    - `W3-LIFECYCLE-PAUSE-SLEEP-PRECEDENCE`: Sleep during pause does not write overlapping gaps
-    - `W3-LIFECYCLE-IDEMPOTENT-PAUSE-RESUME`: Repeated pause or resume calls do not create spurious gaps
-  - 14 adversarial clock and shutdown fixtures in `V1ClockShutdownFixtures.cs`: independent UTC/monotonic/awake movement, forward/backward jumps, repeated UTC labels, new clock segments, stable and inferred sleep, paused quit, injected gap/session-end/flush failures, and native awake-clock availability
+  - 14 V1 Core Truth closure fixtures in `V1CoreTruthFixtures.cs`
+  - 14 adversarial clock and shutdown fixtures in `V1ClockShutdownFixtures.cs`
+  - 11 connectivity and reachability fixtures in `ConnectivityFixtures.cs` (AC-C01–C07: blocked ICMP with HTTPS, 3-round fail / 2-round recovery hysteresis, captive portal sign-in detection, sleep closure, metered suppression, proxy authentication, stale expiry, scope change cancellation, bounded concurrency)
+  - 11 alert engine fixtures in `AlertFixtures.cs` (AC-N01–N07: local disconnect debounce, reachability multi-check evidence, high ping 30s mean, stale/paused suppression, restart deduplication, cooldown, quiet hours popup suppression, rule revision stability, quota event single consumption, disabled probe safety)
+  - 16 network tools, privacy, and V1-Must closure fixtures in `NetworkToolsFixtures.cs` (AC-D01–D07: host normalization/anti-injection, A/AAAA DNS resolution, ping RTT min/max/mean without NaN, ping default 10 attempts per PRD contract, public IP disclosure requirement, HTTPS provider verification, egress NAT caveat, truthful link speed labeling, zero-traffic privacy invariant, Wi-Fi metadata truthfully observed or unavailable, storage migration v2->v3 fidelity, transaction-safe history pruning/clearing, single-instance mutex activation, low-resource UI throttling)
+  - 7 configuration export/import fixtures in `ConfigExportImportFixtures.cs` (AC-U09, AC-S09: atomic file export, round-trip fidelity, malformed rejection, future schema rejection, rule validation, privacy preservation invariant)
   - 3 performance and stability benchmarks (preliminary microbenchmarks)
   - 4 live Windows IP Helper, RouteProvider, and TaskbarCompanion checks
-- **UI Smoke:** Post-change real WPF shell, production navigation across all 5 primary views individually, Quick Panel, and floating widget smoke passed via `scripts/smoke.ps1` on Windows build 19045 (`.NET 10.0.12`) with all 18 native assertions True (`artifacts/smoke-20261011-230102`). An earlier post-change run timed out because a modal shutdown warning blocked unattended exit; the modal warning was removed and the smoke passed.
+- **UI Smoke:** Real WPF shell, production navigation across all 5 primary views individually, Quick Panel, and floating widget smoke passed via `scripts/smoke.ps1` on Windows build 19045 (`.NET 10.0.12`) with all 18 native assertions True (`artifacts/smoke-20261012-005142`).
 
 ## Implemented verified paths
 
@@ -46,50 +36,50 @@
   - Strict monotonic timing domain, 64-bit checked integer deltas, atomic RX/TX overflow handling, `CounterEpoch` and `MeasurementEpoch` boundaries, decimal rate and byte formatters (`MetricFormat`).
   - `HistoricalRange`: Readonly struct with canonical half-open `[StartUtcMs, EndUtcMs)` semantics, non-negative duration enforcement, overlap detection, and duration calculation.
   - `UsageIntervalRecord`: Pure immutable domain record for interval usage accounting, isolating domain and presentation from storage mechanics.
-  - `CalendarRangeResolver`: Timezone-aware local boundary resolution for Today, Yesterday, This Week, This Month, and Billing Cycle. Dynamically derives transition deltas from `TimeZoneInfo.GetAdjustmentRules()`.
-  - `IntegerSplitter`: Cumulative monotonic mapping $\text{CumulativeBytes}(t) = \lfloor \frac{(\text{Int128})B \times (t - t_{start})}{D} \rfloor$ guaranteeing exact partition conservation ($\sum \text{allocated} \equiv \text{original}$) with 0 remainder loss across 10,000 randomized property tests.
-  - `QuotaDomain`: `QuotaRule`, `QuotaDirectionMode`, `QuotaPeriodType`, `QuotaEvaluation`, and `QuotaEvaluator.Evaluate`. Warning thresholds standardized to integer basis points (`int ThresholdBps`, where 8000 = 80.00%, 10000 = 100.00%). PRD §11.2 defaults (`[8000, 9000, 10000]`). Truthful non-zero recorded bytes when disabled. Canonical `BillingCycleIdentity.Create` and `CreateRevision`.
-  - `LiveGraphBuffer`: Pre-allocated circular ring buffer with bounded memory. Monotonic timestamp order guards reject out-of-order points and resolve duplicate timestamps by sequence number. Peak-preserving downsampling.
-  - `SettingsDomain`: `SpeedMeterSettings` schema version 1, value sanitization, monitor identity persistence (`WidgetMonitorDeviceName`, `WidgetMonitorBounds`), atomic write (`.tmp` -> replace), corrupt file recovery (`.corrupt.<ts>.json` backup + safe defaults), and strict rejection of future schema versions (`schemaVersion > CurrentSchemaVersion`).
+  - `CalendarRangeResolver`: Timezone-aware local boundary resolution for Today, Yesterday, This Week, This Month, and Billing Cycle.
+  - `IntegerSplitter`: Cumulative monotonic mapping guaranteeing exact partition conservation ($\sum \text{allocated} \equiv \text{original}$) with 0 remainder loss.
+  - `QuotaDomain`: `QuotaRule`, `QuotaDirectionMode`, `QuotaPeriodType`, `QuotaEvaluation`, and `QuotaEvaluator.Evaluate`. Integer basis points (`int ThresholdBps`). PRD §11.2 defaults (`[8000, 9000, 10000]`).
+  - `LiveGraphBuffer`: Pre-allocated circular ring buffer with bounded memory and peak-preserving downsampling.
+  - `SettingsDomain`: `SpeedMeterSettings` schema version 1, value sanitization, monitor identity persistence, atomic write, corrupt file recovery, and strict future schema rejection.
+  - `ConnectivityDomain`: Independent 3-axis status model (`CollectorState`, `ConnectivityState`, `QualityState`), `EndpointRegistry` with typed approved HTTPS targets, probe result contracts, hysteresis rules, captive portal detection, and metered network policy.
+  - `AlertDomain`: `AlertRule`, `AlertIncident`, `AlertSeverity`, cooldown enforcement, quiet hours popup suppression, and persistent deduplication ledger contracts.
+  - `NetworkDetailsContracts`: `NetworkInterfaceDetails`, `GatewayDetails`, `DnsServerDetails`, and truthful link speed labeling contracts.
 - **SpeedMeter.Storage:**
   - Dedicated storage layer consuming `Microsoft.Data.Sqlite 9.0.2` and security-patched `SQLitePCLRaw.bundle_e_sqlite3 2.1.12`.
-  - Single background writer over bounded `Channel`.
-  - WAL mode, `PRAGMA synchronous = FULL; foreign_keys = ON; busy_timeout = 5000;`.
-  - BigEndianCodec, CheckedIntegerMath.
+  - Single background writer over bounded `Channel`, WAL mode, `PRAGMA synchronous = FULL; foreign_keys = ON; busy_timeout = 5000;`.
   - Migration 2: Table `quota_threshold_events` with integer compound uniqueness `UNIQUE(rule_id, rule_revision, cycle_identifier, threshold_bps)`.
-  - Strict inequality half-open range queries in `GetIntervalsAsync` and `GetPagedIntervalsAsync`.
-  - Range-aware `GetTotalBytesAsync` using `IntegerSplitter`.
-  - Truthful coverage denominator in `GetUsageSummaryAsync` accounting for unexplained holes. Consecutive interval temporal overlap detection flags `StorageDegraded`.
-  - Idempotent `ComputeDailyRollupsAsync` preserving actual `(scope_id, network_profile_id)` dimensions.
+  - Migration 3: Tables `connectivity_incidents` and `alert_incidents` with compound unique constraints for restart-durable incident deduplication and timeline history.
+  - Strict inequality half-open range queries, range-aware `GetTotalBytesAsync`, and daily rollup computation.
 - **SpeedMeter.Application:**
-  - `IUsageHistoryService` / `UsageHistoryService`: Period summaries, custom ranges, paged intervals, and availability.
+  - `IUsageHistoryService` / `UsageHistoryService`: Period summaries, custom ranges, paged intervals, availability, `PruneHistoryAsync`, and `ClearAllHistoryAsync`.
   - `IQuotaService` / `QuotaService`: Cycle quota evaluation, threshold event recording, and persistent alert deduplication.
   - `ISettingsService` / `SettingsService`: Centralized settings state, atomic disk persistence, and `SettingsChanged` event notifications.
-  - `ILiveGraphService` / `LiveGraphService`: In-memory graph sampling and downsampled window snapshots.
-  - `IExportService` / `ExportService`: Keyset-paged CSV export with metadata disclosure header comments and spreadsheet injection neutralization; valid JSON export with schema v1.0 and explicit nulls; atomic `.tmp` replacement.
-  - `ApplicationContext`: Composition root wiring Collector, Storage, History, Quota, Settings, LiveGraph, and Export services. Storage-free constructor overload completely insulates UI from `SpeedMeter.Storage` assembly. Dynamic `SettingsChanged` syncs `Collector.Interval`.
-  - Headless `Collector` with lifecycle states, lock-free consumer notifications, AutoPrimary route selection, and debounced scope transitions.
+  - `IConnectivityService` / `ConnectivityService`: Passive Windows link monitoring, optional active HTTPS reachability checks with hysteresis, metered suppression, and captive portal detection.
+  - `INetworkToolsService` / `NetworkToolsService`: Passive network details, ping benchmark runner, DNS resolution, and privacy-guarded manual public IP lookup.
+  - `IAlertService` / `AlertService`: Rule evaluation, incident deduplication, cooldown tracking, and quiet hours suppression.
+  - `ConfigExportImportService`: Versioned JSON configuration export/import with atomic writing, schema compatibility validation, and privacy invariant preservation.
+  - `ApplicationContext`: Composition root wiring Collector, Storage, History, Quota, Settings, LiveGraph, Connectivity, Tools, Alerts, and Export services.
 - **SpeedMeter.Windows & App:**
-  - Design tokens (`Tokens.xaml`, `ThemeDark.xaml`) with directional download `#3B82F6` and upload `#14B8A6`. Tabular numerals across all metrics.
-  - Complete MVVM presentation architecture: `MainViewModel`, `OverviewViewModel`, `LiveTrafficViewModel`, `HistoryViewModel`, `QuotaViewModel`, `SettingsViewModel`, `QuickPanelViewModel`, `NetworkToolsViewModel`, `AppsViewModel`. Strict presentation boundary: zero direct references to `SpeedMeter.Storage` or `Microsoft.Data.Sqlite` in `SpeedMeter.App.dll`.
-  - Modern navigation shell (`MainWindow.xaml`) with 5 primary destinations (Overview, Live Traffic, Apps, History, Network Tools) + Settings/About, dynamic `StorageDegradedBanner`, and live settings synchronization.
-  - `PlacementHelper`: Multi-monitor coordinate and per-monitor DPI DIP conversion using Win32 `MonitorFromPoint` and `GetDpiForWindow`.
-  - `QuickPanelWindow`: Compact popup window with multi-monitor work-area clamping, Escape auto-dismiss, and pause toggle.
-  - Native Win32 `GetIfTable2` adapter enumeration (35 adapters observed).
-  - RouteProvider dual-stack egress candidate enumeration.
-  - TaskbarCompanion AppBar query and floating widget fallback.
-  - Minimal floating widget with keyboard nudging, lock, opacity, click-through with typed tray recovery (`DisableClickThroughMenuItem`), and WPF shell.
+  - Design tokens (`Tokens.xaml`, `ThemeDark.xaml`, `ThemeLight.xaml`) with directional colors. Tabular numerals across all metrics.
+  - Full theme engine (`ThemeManager`) supporting Dark, Light, and System (Windows registry `AppsUseLightTheme` with fallback) via pack URIs.
+  - Complete MVVM presentation architecture: `MainViewModel`, `OverviewViewModel`, `LiveTrafficViewModel`, `HistoryViewModel`, `QuotaViewModel`, `SettingsViewModel`, `QuickPanelViewModel`, `NetworkToolsViewModel`, `AppsViewModel`.
+  - Floating widget with Minimal, Compact Graph (live sparkline), and Detailed layouts, idle dimming, fullscreen auto-hide, and tray click-through recovery.
+  - Windows Startup helper (`StartupHelper`) via HKCU Run registry key.
+  - Global hotkeys (`HotkeyHelper`) for Dashboard, Widget toggle, and Click-through recovery.
+  - Transparent first-run privacy onboarding (`FirstRunWindow`).
+  - Modern navigation shell with 5 primary destinations + Settings, dynamic storage and connectivity banners, and live settings synchronization.
 
 ## Validated on real Windows
 
 - **Host Environment:** Microsoft Windows 10 Pro x64 (build 10.0.19045.0), 4 logical processors, .NET 10.0.12 runtime. Developer evidence only; not a release port authorization.
 - **Observed:**
-  - 197 passed checks, 1 intentional skip, 0 failed checks. Exit code: 0. Offline NuGet audit override was required for restore; the executable fixture runner ran.
-  - Post-change UI smoke test passed with all 18 native assertions verified (`True`). Exit code: 0. Window geometry: 1160x780. Click-through tray semantic recovery verified.
+  - 222 passed checks, 1 intentional skip, 0 failed checks via `check.ps1`; 229 passed checks, 1 skip, 0 failed via `check.ps1 -Windows`. Exit code: 0.
+  - Post-change UI smoke test passed with all 18 native assertions verified (`True`). Exit code: 0. Window geometry: 1160x780. Artifact: `artifacts/smoke-20261012-002140`.
 
 ## Clock and shutdown truth limits
 
-- Production `MeasurementClock` uses .NET `Stopwatch`/Windows QPC for elapsed time, UTC for history placement, and Windows unbiased interrupt time to identify a missed suspend notification. On the observed Windows 10 build 19045 host, the precise API entry point was absent and the standard unbiased API returned a valid awake-time value. This is developer-host evidence, not Windows 11 certification.
+- Production `MeasurementClock` uses .NET `Stopwatch`/Windows QPC for elapsed time, UTC for history placement, and Windows unbiased interrupt time to identify a missed suspend notification.
 - Stable lifecycle gaps persist observed UTC endpoints and monotonic duration. A wall-clock jump produces a zero-width gap event plus a new clock segment. Affected calendar summaries report `ClockUncertain` and the UI suppresses the coverage percentage. Distinct valid readings can have repeated UTC labels across segments; exact bytes are preserved without falsely claiming globally disjoint UTC labels.
-- Normal quit keeps a structured `CollectorShutdownResult`, traces failures, and does not assert clean durability without successful flush barriers and healthy storage. The collector storage phase has a two-second deadline. Whole `ApplicationContext`/SQLite disposal timing and a bounded user-facing failure notification remain unverified.
-- Controlled hardware sleep/hibernate, timezone-only reporting changes, system clock changes on a live Windows host, Windows 11, and full AC-M05/M08/S05 acceptance remain environment-pending. No Wave 4 work is authorized.
+- Normal quit keeps a structured `CollectorShutdownResult`, traces failures, and does not assert clean durability without successful flush barriers and healthy storage.
+- Controlled hardware sleep/hibernate, timezone-only reporting changes, system clock changes on a live Windows host, Windows 11, and full AC-M05/M08/S05 acceptance remain designated as `RELEASE-GATE PENDING` for Wave 5 (Release Engineering). Gate D is passed.
+

@@ -21,7 +21,10 @@
                 <DockPanel>
                     <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
                         <TextBlock Text="Collector: " Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeCaption}" />
-                        <TextBlock Text="{Binding CollectorStateText}" FontWeight="SemiBold" FontSize="{StaticResource FontSizeCaption}" Margin="0,0,16,0" />
+                        <TextBlock Text="{Binding CollectorStateText}" FontWeight="SemiBold" FontSize="{StaticResource FontSizeCaption}" Margin="0,0,12,0" />
+                        <Border Background="{StaticResource PanelElevatedBrush}" BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="3" Padding="6,2" Margin="0,0,12,0">
+                            <TextBlock Text="{Binding ConnectivityPillText, StringFormat='Net: {0}'}" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
+                        </Border>
                         <Border Background="{StaticResource StatusSuccessBrush}" CornerRadius="3" Padding="6,2" Visibility="{Binding IsDegraded, Converter={x:Null}}">
                             <TextBlock Text="NORMAL" FontSize="10" FontWeight="Bold" Foreground="#FFFFFF" />
                         </Border>

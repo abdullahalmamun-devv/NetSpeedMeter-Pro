@@ -10,7 +10,7 @@ public sealed class IncompatibleSchemaException : Exception
 
 public static class SqliteMigrations
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     public static void ApplyMigrations(SqliteConnection connection)
     {
@@ -45,6 +45,10 @@ public static class SqliteMigrations
         if (currentVersion < 2)
         {
             ApplyMigration2(connection);
+        }
+        if (currentVersion < 3)
+        {
+            ApplyMigration3(connection);
         }
     }
 
@@ -233,6 +237,65 @@ public static class SqliteMigrations
                 ";
                 cmd.ExecuteNonQuery();
             }
+            tx.Commit();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+    private static void ApplyMigration3(SqliteConnection connection)
+    {
+        using var tx = connection.BeginTransaction();
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = @"
+                CREATE TABLE connectivity_events (
+                    event_id TEXT NOT NULL PRIMARY KEY,
+                    event_type TEXT NOT NULL,
+                    evidence_source TEXT NOT NULL,
+                    scope_id TEXT,
+                    network_profile_id TEXT,
+                    state TEXT NOT NULL,
+                    observed_at_utc_ms INTEGER NOT NULL,
+                    confirmed_at_utc_ms INTEGER,
+                    certainty TEXT NOT NULL,
+                    detail TEXT
+                ) STRICT;
+                CREATE INDEX idx_connectivity_events_time ON connectivity_events(observed_at_utc_ms, event_id);
+
+                CREATE TABLE alert_rule_state (
+                    state_key TEXT NOT NULL PRIMARY KEY,
+                    version INTEGER NOT NULL CHECK(version > 0),
+                    active_incident_id TEXT,
+                    active_rule_revision INTEGER NOT NULL CHECK(active_rule_revision >= 0),
+                    last_trigger_utc_ms INTEGER NOT NULL,
+                    next_incident_number INTEGER NOT NULL CHECK(next_incident_number > 0)
+                ) STRICT;
+                CREATE TABLE alert_events (
+                    event_id TEXT NOT NULL PRIMARY KEY,
+                    incident_id TEXT NOT NULL,
+                    rule_id TEXT NOT NULL,
+                    rule_revision INTEGER NOT NULL CHECK(rule_revision > 0),
+                    alert_kind TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    scope_id TEXT NOT NULL,
+                    network_id TEXT NOT NULL,
+                    observed_at_utc_ms INTEGER NOT NULL,
+                    observed_metric REAL,
+                    evidence_description TEXT NOT NULL,
+                    suppress_popup INTEGER NOT NULL CHECK(suppress_popup IN (0,1))
+                ) STRICT;
+                CREATE INDEX idx_alert_events_time ON alert_events(observed_at_utc_ms, event_id);
+
+                INSERT INTO schema_migrations (version, migration_id, checksum, applied_at_utc_ms)
+                VALUES (3, 'V3_WAVE4_CONNECTIVITY_ALERT_EVENTS', '6cf48d13', " + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + @");
+                PRAGMA user_version = 3;
+            ";
+            cmd.ExecuteNonQuery();
             tx.Commit();
         }
         catch
