@@ -211,7 +211,8 @@ public static class ConsumerUpdateFixtures
         service.InstallVerifiedUpdate();
         Require(service.Status.State == UpdateState.Installing && launchedPath == ready.ReadyInstallerPath &&
                 launchedArguments is not null && launchedArguments.SequenceEqual(
-                    new[] { "-Silent", "-LaunchAfterInstall", "-Dir", AppContext.BaseDirectory }) &&
+                    new[] { "-Silent", "-LaunchAfterInstall", "-Dir",
+                        Path.TrimEndingDirectorySeparator(Path.GetFullPath(AppContext.BaseDirectory)) }) &&
                 deniedWriteWhileLaunching,
             "Verified launch contract or staging write lock failed.");
         Require(fixture.Handler.RequestCount == 2, "Expected one manifest and one package retrieval.");

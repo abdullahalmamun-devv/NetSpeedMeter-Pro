@@ -744,7 +744,7 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
 
         // 1. Fresh Install
         var installOpts = new InstallOptions(
-            TargetDirectory: targetInstall,
+            TargetDirectory: targetInstall + Path.DirectorySeparatorChar,
             PayloadZipPath: payloadZip,
             Silent: true,
             LaunchAfterInstall: false,

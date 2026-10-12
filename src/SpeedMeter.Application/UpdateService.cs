@@ -303,7 +303,8 @@ public sealed class UpdateService : IUpdateService, IDisposable
             // The current executable directory is the installed product location.
             // No install path from network metadata or mutable user settings is trusted.
             launchInstaller(verifiedInstallerPath,
-                ["-Silent", "-LaunchAfterInstall", "-Dir", AppContext.BaseDirectory]);
+                ["-Silent", "-LaunchAfterInstall", "-Dir",
+                    Path.TrimEndingDirectorySeparator(Path.GetFullPath(AppContext.BaseDirectory))]);
             Publish(UpdateState.Installing, "Verified installer started. SpeedMeter Pro will close while the update runs.", manifest);
         }
         catch

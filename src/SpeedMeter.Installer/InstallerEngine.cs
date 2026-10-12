@@ -516,7 +516,7 @@ public static class InstallerEngine
                      StringSplitOptions.RemoveEmptyEntries))
             if (segment is "." or "..")
                 throw new InvalidOperationException("Install location must not contain dot segments.");
-        var target = Path.GetFullPath(path);
+        var target = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
         var leaf = Path.GetFileName(Path.TrimEndingDirectorySeparator(target));
         var isProductLeaf = string.Equals(leaf, "SpeedMeterPro", StringComparison.OrdinalIgnoreCase);
         var isTestInstallLeaf = string.Equals(leaf, "install", StringComparison.OrdinalIgnoreCase) &&
@@ -526,7 +526,7 @@ public static class InstallerEngine
         var profile = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         var realData = Path.GetFullPath(GetDefaultUserDataDirectory());
 
-        // A deferred batch remains in RC.2. Do not let cmd parse any part of a path as
+        // A deferred batch remains. Do not let cmd parse any part of a path as
         // an expansion, command separator, grouping operator, or redirection.
         RejectCmdCharacters(target);
         if (SameOrChild(target, profile) || SameOrChild(target, realData) || SameOrChild(realData, target))
