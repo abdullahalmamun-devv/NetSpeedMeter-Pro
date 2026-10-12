@@ -27,6 +27,7 @@
                            FontWeight="Bold"
                            Foreground="{StaticResource TextPrimaryBrush}" />
                 <TextBlock Text="Truthful, local-first network metering for Windows"
+                           TextWrapping="Wrap"
                            FontSize="{StaticResource FontSizeBodySmall}"
                            Foreground="{StaticResource TextSecondaryBrush}"
                            Margin="0,4,0,0" />
