@@ -11,7 +11,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'test-sandbox.ps1')
 
 Write-Host "================================================================" -ForegroundColor Cyan
-Write-Host "   SpeedMeter Pro V1.0 RC.3 Release Candidate Orchestrator   " -ForegroundColor Cyan
+Write-Host "   SpeedMeter Pro V1.0 RC.4 Release Candidate Orchestrator   " -ForegroundColor Cyan
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host "Timestamp: $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss UTC'))"
 Write-Host "Host OS:   $((Get-CimInstance Win32_OperatingSystem).Caption) ($((Get-CimInstance Win32_OperatingSystem).Version))"
@@ -69,19 +69,19 @@ if (-not $SkipSmoke) {
 # 4. Packaging & Authenticode Signing
 Write-Host ""
 Write-Host "[4/6] Producing Standalone Installer and Distribution Packages..." -ForegroundColor Yellow
-& (Join-Path $PSScriptRoot 'package.ps1') -SignMode $SignMode
+& (Join-Path $PSScriptRoot 'package.ps1') -Version '1.0.0-rc.4' -SignMode $SignMode
 if ($LASTEXITCODE -ne 0) { throw "Packaging failed." }
 
 # 5. SBOM & Third-Party Notices Generation
 Write-Host ""
 Write-Host "[5/6] Generating SBOM (SPDX 2.3) and Third-Party Notices..." -ForegroundColor Yellow
-& (Join-Path $PSScriptRoot 'sbom.ps1')
+& (Join-Path $PSScriptRoot 'sbom.ps1') -Version '1.0.0-rc.4'
 if ($LASTEXITCODE -ne 0) { throw "SBOM generation failed." }
 
 # 6. Release Checksums (RELEASE-HASHES.sha256)
 Write-Host ""
 Write-Host "[6/6] Generating Authoritative Release Hashes..." -ForegroundColor Yellow
-$releaseDir = Join-Path $projectRoot 'artifacts\release\1.0.0-rc.3'
+$releaseDir = Join-Path $projectRoot 'artifacts\release\1.0.0-rc.4'
 $hashFile = Join-Path $releaseDir 'RELEASE-HASHES.sha256'
 
 $filesToHash = Get-ChildItem -Path $releaseDir -File | Where-Object {
@@ -104,9 +104,9 @@ Write-Host "Wrote authoritative release hashes to: $hashFile" -ForegroundColor G
 # 7. Package Verification Drill & Live Installer Drill
 Write-Host ""
 Write-Host "=== Performing Release Candidate Verification Drill ===" -ForegroundColor Cyan
-$setupExe = Join-Path $releaseDir 'SpeedMeterPro-1.0.0-rc.3-Setup.exe'
+$setupExe = Join-Path $releaseDir 'SpeedMeterPro-1.0.0-rc.4-Setup.exe'
 if (-not (Test-Path -LiteralPath $setupExe)) {
-    throw "Verification drill failed: SpeedMeterPro-1.0.0-rc.3-Setup.exe missing."
+    throw "Verification drill failed: SpeedMeterPro-1.0.0-rc.4-Setup.exe missing."
 }
 
 # Verify Authenticode on Primary Setup.exe
@@ -177,6 +177,34 @@ try {
     if ($pUninstall.ExitCode -ne 0) {
         throw "Uninstaller drill failed with exit code $($pUninstall.ExitCode)."
     }
+    # The installed bootstrap exits after handing off to the out-of-tree helper.
+    # Wait for the helper's durable completion result, not just parent exit or
+    # the target rename into a still-populated quarantine directory.
+    $normalizedDrillDir = [System.IO.Path]::GetFullPath($drillDir).TrimEnd([char[]]@('\','/')).ToUpperInvariant()
+    $targetHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+        [Text.Encoding]::UTF8.GetBytes($normalizedDrillDir)))
+    $resultPath = Join-Path (Join-Path $env:TEMP 'SpeedMeterPro.Cleanup') ("result-$targetHash.json")
+    $cleanupWait = [System.Diagnostics.Stopwatch]::StartNew()
+    $cleanupResult = $null
+    while ($cleanupWait.Elapsed -lt [TimeSpan]::FromSeconds(30)) {
+        if (Test-Path -LiteralPath $resultPath) {
+            $cleanupResult = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+            if ($cleanupResult.State -eq 'Failed') {
+                throw "Uninstaller helper failed: $($cleanupResult.Message)"
+            }
+            if ($cleanupResult.State -eq 'Completed') { break }
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if ($null -eq $cleanupResult -or $cleanupResult.State -ne 'Completed' -or
+        $cleanupResult.TargetHash -ne $targetHash -or -not $cleanupResult.Nonce) {
+        throw "Uninstaller drill failed: no matching helper completion within 30 seconds."
+    }
+    $quarantine = @(Get-ChildItem -LiteralPath $drillRoot -Directory -Force |
+        Where-Object { $_.Name -like '.install.removing.*' })
+    if ((Test-Path -LiteralPath $drillDir) -or $quarantine.Count -ne 0) {
+        throw "Uninstaller drill failed: product install or quarantine directory remains after helper completion."
+    }
     Write-Host "Installation and uninstallation drills verified successfully." -ForegroundColor Green
 } finally {
     Remove-TestSandboxRoot $drillRoot
@@ -194,6 +222,6 @@ if ($SkipTests -or $SkipSmoke -or $AllowDirty) {
 
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Green
-Write-Host "  RC.3 PACKAGE DRILL PASSED -- INDEPENDENT CONSUMER REVIEW REQUIRED" -ForegroundColor Green
+Write-Host "  RC.4 PACKAGE DRILL PASSED -- INDEPENDENT CONSUMER REVIEW REQUIRED" -ForegroundColor Green
 Write-Host "  GATE E2 FIELD VALIDATION NOT AUTHORIZED BY THIS SCRIPT" -ForegroundColor Yellow
 Write-Host "================================================================" -ForegroundColor Green

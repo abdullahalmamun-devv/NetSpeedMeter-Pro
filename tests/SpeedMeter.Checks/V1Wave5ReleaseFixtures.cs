@@ -131,8 +131,8 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
     private static void CanonicalVersionIdentityConformity()
     {
         Require(ProductIdentity.Name == "SpeedMeter Pro", "Product name mismatch.");
-        Require(ProductIdentity.ProductVersion == "1.0.0-rc.3", "Product version must be 1.0.0-rc.3.");
-        Require(ProductIdentity.FileVersion == "1.0.0.3", "File version must be 1.0.0.3.");
+        Require(ProductIdentity.ProductVersion == "1.0.0-rc.4", "Product version must be 1.0.0-rc.4.");
+        Require(ProductIdentity.FileVersion == "1.0.0.4", "File version must be 1.0.0.4.");
         Require(ProductIdentity.ReleaseChannel == "rc", "Release channel must be rc.");
         Require(ProductIdentity.DatabaseSchemaVersion == 3, "Database schema version must be 3.");
         Require(!string.IsNullOrWhiteSpace(ProductIdentity.CommitSha), "Commit SHA cannot be empty.");

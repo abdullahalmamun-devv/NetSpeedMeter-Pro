@@ -195,6 +195,8 @@
                     </TextBlock>
                     <TextBlock Text="{Binding UpdateStatus.Message}" TextWrapping="Wrap" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,8" AutomationProperties.LiveSetting="Polite" />
                     <TextBlock Text="{Binding UpdateSize}" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
+                    <TextBlock Text="Installing an update closes and restarts SpeedMeter Pro. Your history and settings are kept."
+                               TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeBodySmall}" Margin="0,0,0,8" />
                     <ProgressBar Minimum="0" Maximum="100" Value="{Binding UpdateProgress, Mode=OneWay}" Height="8" Margin="0,0,0,12" AutomationProperties.Name="Update download progress" />
                     <WrapPanel>
                         <Button Content="Check for updates" Command="{Binding CheckForUpdatesCommand}" Margin="0,0,8,8" />

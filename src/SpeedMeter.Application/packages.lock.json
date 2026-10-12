@@ -55,7 +55,7 @@
         "dependencies": {
           "Microsoft.Data.Sqlite": "[9.0.2, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[2.1.12, )",
-          "SpeedMeter.Core": "[1.0.0-rc.3, )"
+          "SpeedMeter.Core": "[1.0.0-rc.4, )"
         }
       }
     },

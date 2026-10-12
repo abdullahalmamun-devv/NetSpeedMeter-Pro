@@ -28,7 +28,9 @@ public sealed class InstallerWindow : Window
     private bool _busy;
     private bool _completed;
 
-    public int ExitCode { get; private set; }
+    // Windows ERROR_INSTALL_USEREXIT: closing the initial window is cancellation,
+    // never a completed uninstall result for the external cleanup handoff.
+    public int ExitCode { get; private set; } = 1602;
 
     public InstallerWindow(bool uninstall, string? targetDir, string? payloadPath, Stream? payloadStream,
         bool purgeRequested, bool noLaunch, bool launchRequested)
@@ -233,6 +235,11 @@ public sealed class InstallerWindow : Window
                 SpeedMeterRunningException => "SpeedMeter Pro could not close safely. Close it and try again.",
                 FileNotFoundException => "The installation package is incomplete. Download Setup.exe again and retry.",
                 UnauthorizedAccessException => "Windows denied access to a required file. Check the setup log and retry.",
+                IOException when _uninstall && purgeUserData &&
+                    ex.Message.StartsWith("SpeedMeter Pro was removed, but some local data", StringComparison.Ordinal) =>
+                    "SpeedMeter Pro was removed, but some local data could not be deleted. Check the setup log for the remaining folder.",
+                IOException when _uninstall && ex.Message.StartsWith("Cleanup could not finish", StringComparison.Ordinal) =>
+                    "Removal is incomplete. Some application files may remain in the cleanup folder named in the setup log.",
                 _ => _uninstall ? "Uninstall failed. Check the setup log and retry."
                     : "Installation failed. Check the setup log and retry."
             };

@@ -366,7 +366,7 @@ public static class InstallerEngine
         }
     }
 
-    public static async Task UninstallAsync(UninstallOptions options)
+    public static Task UninstallAsync(UninstallOptions options)
     {
         var log = options.Log ?? (_ => { });
         var targetDir = Path.GetFullPath(options.InstallDirectory ?? GetDefaultInstallDirectory());
@@ -397,16 +397,26 @@ public static class InstallerEngine
         var isCanonicalInstall = SamePath(targetDir, GetDefaultInstallDirectory());
         var touchUserData = options.TestUserDataDirectory is not null || options.PurgeUserData || isCanonicalInstall;
         var updateStagingDir = Path.Combine(userDataDir, "staging");
-        if (touchUserData && Directory.Exists(updateStagingDir))
+        if (touchUserData && Directory.Exists(updateStagingDir) && !options.PurgeUserData)
         {
-            try { Directory.Delete(updateStagingDir, recursive: true); }
+            try { QuarantineAndDelete(updateStagingDir, userDataDir, "staging"); }
             catch (Exception ex) { log($"Warning: Could not remove staged update packages: {ex.Message}"); }
         }
 
+        Exception? purgeError = null;
         if (options.PurgeUserData)
         {
             log($"Purging all user data and historical databases at {userDataDir}...");
-            if (Directory.Exists(userDataDir)) Directory.Delete(userDataDir, recursive: true);
+            if (Directory.Exists(userDataDir))
+            {
+                try { QuarantineAndDelete(userDataDir, Path.GetDirectoryName(userDataDir)!,
+                    options.TestUserDataDirectory is null ? "SpeedMeterPro" : Path.GetFileName(userDataDir)); }
+                catch (Exception ex)
+                {
+                    purgeError = ex;
+                    log($"Warning: Local data cleanup did not complete: {ex.Message}");
+                }
+            }
         }
         else
         {
@@ -436,23 +446,22 @@ public static class InstallerEngine
             catch { }
         }
 
-        // 4. Remove Program Binaries
+        // 4. Remove program binaries. The installed Uninstall.exe is first relaunched
+        // from a verified out-of-tree copy by Program, so deletion completes here.
         log("Removing application program files...");
         if (Directory.Exists(targetDir))
         {
-            // The deferred cmd helper receives only a fully validated, product-owned path.
-            // Reject CMD expansion/control characters until this legacy helper is replaced.
-            var cleanupBat = Path.Combine(Path.GetTempPath(), $"speedmeter_uninstall_{Guid.NewGuid():N}.bat");
-            RejectCmdCharacters(cleanupBat);
-            var batContent = $"@echo off\r\nping 127.0.0.1 -n 2 > nul\r\nrd /s /q \"{targetDir}\"\r\ndel \"%~f0\"";
-            await File.WriteAllTextAsync(cleanupBat, batContent);
-            var cleanup = new ProcessStartInfo("cmd.exe") { CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden };
-            cleanup.ArgumentList.Add("/c");
-            cleanup.ArgumentList.Add(cleanupBat);
-            Process.Start(cleanup);
+            if (SameOrChild(targetDir, Environment.ProcessPath ?? ""))
+                throw new InvalidOperationException("The installed uninstaller is still running. Start cleanup through its verified external helper.");
+            ValidateUninstallRequest(options);
+            QuarantineAndDelete(targetDir, Path.GetDirectoryName(targetDir)!,
+                IsValidDisposableInstallTarget(targetDir) ? "install" : "SpeedMeterPro", requireOwnedInstall: true);
         }
 
+        if (purgeError is not null)
+            throw new IOException("SpeedMeter Pro was removed, but some local data could not be deleted. Check the setup log for the remaining folder.", purgeError);
         log("SpeedMeter Pro has been uninstalled.");
+        return Task.CompletedTask;
     }
 
     internal static string InstallMarkerContent(string path) =>
@@ -470,10 +479,7 @@ public static class InstallerEngine
         if (!Directory.Exists(target))
             throw new InvalidOperationException("Target installation does not exist.");
         var isOwned = IsOwnedInstall(target);
-        var isLegacyCanonical = SamePath(target, canonicalInstall) &&
-            File.Exists(Path.Combine(target, "Uninstall.exe")) &&
-            File.Exists(Path.Combine(target, "SpeedMeter.App.exe"));
-        if (!isOwned && !isLegacyCanonical)
+        if (!isOwned)
             throw new InvalidOperationException("Target is not a recognized SpeedMeter Pro installation.");
 
         if (options.TestUserDataDirectory is not null)
@@ -526,19 +532,71 @@ public static class InstallerEngine
         var profile = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         var realData = Path.GetFullPath(GetDefaultUserDataDirectory());
 
-        // A deferred batch remains. Do not let cmd parse any part of a path as
-        // an expansion, command separator, grouping operator, or redirection.
-        RejectCmdCharacters(target);
         if (SameOrChild(target, profile) || SameOrChild(target, realData) || SameOrChild(realData, target))
             throw new InvalidOperationException("Install location cannot contain the user profile or SpeedMeter Pro data.");
         RejectReparseComponents(target);
         if (Directory.Exists(target)) RejectReparseTree(target);
     }
 
-    private static void RejectCmdCharacters(string path)
+    private static void QuarantineAndDelete(string source, string expectedParent, string expectedLeaf,
+        bool requireOwnedInstall = false)
     {
-        if (path.IndexOfAny(['%', '!', '^', '&', '|', '<', '>', '(', ')', '"', '\r', '\n']) >= 0)
-            throw new InvalidOperationException("Path contains unsupported command characters.");
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source));
+        if (!SamePath(Path.GetDirectoryName(full)!, expectedParent) ||
+            !string.Equals(Path.GetFileName(full), expectedLeaf, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Cleanup root is not the expected product directory.");
+        RejectReparseComponents(full);
+        RejectReparseTree(full);
+        if (requireOwnedInstall && !IsOwnedInstall(full))
+            throw new InvalidOperationException("Installation ownership changed before cleanup.");
+        var quarantine = Path.Combine(expectedParent, $".{expectedLeaf}.removing.{Guid.NewGuid():N}");
+        RejectReparseComponents(expectedParent);
+        Directory.Move(full, quarantine);
+        try
+        {
+            RejectReparseComponents(quarantine);
+            RejectReparseTree(quarantine);
+            DeleteTreeChecked(quarantine, expectedParent);
+        }
+        catch (Exception ex)
+        {
+            throw new IOException($"Cleanup could not finish; remaining files may be in {quarantine}.", ex);
+        }
+    }
+
+    private static void DeleteTreeChecked(string root, string expectedParent)
+    {
+        if (!SamePath(Path.GetDirectoryName(root)!, expectedParent))
+            throw new InvalidOperationException("Cleanup escaped its product parent.");
+        var pending = new Stack<(string Path, bool Visited)>();
+        pending.Push((root, false));
+        while (pending.Count > 0)
+        {
+            var (current, visited) = pending.Pop();
+            if (!SameOrChild(root, current))
+                throw new InvalidOperationException("Cleanup escaped its quarantine root.");
+            RejectReparseComponents(current);
+            var attributes = File.GetAttributes(current);
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException("A reparse point blocks cleanup.");
+            if ((attributes & FileAttributes.Directory) == 0)
+            {
+                File.Delete(current);
+                continue;
+            }
+            if (visited)
+            {
+                Directory.Delete(current, recursive: false);
+                continue;
+            }
+            pending.Push((current, true));
+            foreach (var child in Directory.EnumerateFileSystemEntries(current))
+            {
+                if (!SameOrChild(root, child))
+                    throw new InvalidOperationException("Cleanup child escaped its quarantine root.");
+                pending.Push((child, false));
+            }
+        }
     }
 
     private static void ValidateTestDataOverride(string dataPath, string target)

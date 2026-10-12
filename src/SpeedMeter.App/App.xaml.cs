@@ -27,6 +27,15 @@ public partial class App : System.Windows.Application
         var smokeIndex = Array.IndexOf(e.Args, "--smoke");
         var smokeDirectory = smokeIndex >= 0 && e.Args.Length > smokeIndex + 1 ? Path.GetFullPath(e.Args[smokeIndex + 1]) : null;
         var testRootIndex = Array.IndexOf(e.Args, "--test-root");
+        var crashIndex = Array.IndexOf(e.Args, "--test-crash");
+        string? testCrash = null;
+        if (crashIndex >= 0)
+        {
+            if (testRootIndex < 0 || crashIndex + 1 >= e.Args.Length ||
+                e.Args[crashIndex + 1] is not ("dispatcher" or "background"))
+                throw new InvalidOperationException("Controlled crash requires a validated --test-root and dispatcher or background mode.");
+            testCrash = e.Args[crashIndex + 1];
+        }
         string? isolatedDataDirectory = null;
         if (smokeIndex >= 0 && smokeDirectory is null)
             throw new InvalidOperationException("UI smoke requires an output directory.");
@@ -106,6 +115,21 @@ public partial class App : System.Windows.Application
         {
             var window = new MainWindow(smokeDirectory, isolatedDataDirectory);
             MainWindow = window;
+            if (testCrash is not null)
+            {
+                // A disposable, sentinelled profile is mandatory. This command is
+                // deliberately absent from consumer UI and normal startup paths.
+                var crashMode = testCrash;
+                window.Loaded += (_, _) =>
+                {
+                    if (crashMode == "dispatcher")
+                        Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,
+                            new Action(() => throw new InvalidOperationException("Controlled test dispatcher crash.")));
+                    else
+                        new Thread(() => throw new InvalidOperationException("Controlled test background crash."))
+                        { IsBackground = true, Name = "SpeedMeter controlled crash test" }.Start();
+                };
+            }
             window.Show();
             var priorReport = recovery?.Outcome == PreviousRunOutcome.KnownCrash ? recovery.Report : null;
             if (priorReport is not null)

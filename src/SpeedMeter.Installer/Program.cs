@@ -11,6 +11,24 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        string? helperTarget = null;
+        var externalHelper = UninstallBootstrap.IsMode(args);
+        if (externalHelper)
+        {
+            try
+            {
+                (helperTarget, args) = UninstallBootstrap.ValidateAndWait(args[1]);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[FATAL ERROR] Cleanup handoff rejected: {ex.Message}");
+                UninstallBootstrap.LogHandoffFailure("Cleanup handoff rejected: " + ex.Message);
+                if (!HasArg(args, "-Silent"))
+                    MessageBox.Show("SpeedMeter Pro could not safely finish uninstalling. Application files and local data may remain. " +
+                        ex.Message, "Uninstall incomplete", MessageBoxButton.OK, MessageBoxImage.Error);
+                return 1;
+            }
+        }
         var isUninstall = HasArg(args, "-Uninstall", "/UNINSTALL", "-u", "/u");
         var isSilent = HasArg(args, "-Silent", "/SILENT", "-s", "/s", "-S", "/S", "/qn", "-qn");
         var purgeData = HasArg(args, "-PurgeUserData", "/PURGE", "-purge", "/purge");
@@ -19,7 +37,10 @@ internal static class Program
         var desktopShortcut = HasArg(args, "-DesktopShortcut", "/DESKTOPSHORTCUT");
         var startWithWindows = HasArg(args, "-StartWithWindows", "/STARTWITHWINDOWS");
         var payloadPath = GetArgValue(args, "-Payload", "/PAYLOAD", "-payload");
-        var targetDir = GetArgValue(args, "-Dir", "/DIR", "-TargetDir", "-dir", "/dir");
+        var targetDir = GetArgValue(args, "-Dir", "/DIR", "-TargetDir", "-dir", "/dir") ?? helperTarget;
+        if (isUninstall && targetDir is null &&
+            string.Equals(Path.GetFileName(Environment.ProcessPath), "Uninstall.exe", StringComparison.OrdinalIgnoreCase))
+            targetDir = Path.GetDirectoryName(Environment.ProcessPath);
 
         void Log(string message)
         {
@@ -31,6 +52,9 @@ internal static class Program
 
         try
         {
+            if (isUninstall && !externalHelper &&
+                UninstallBootstrap.TryStart(args, Path.GetFullPath(targetDir ?? InstallerEngine.GetDefaultInstallDirectory())))
+                return 0;
             Stream? payloadStream = null;
             if (!isUninstall)
             {
@@ -54,6 +78,9 @@ internal static class Program
                     isUninstall, targetDir, payloadPath, payloadStream,
                     purgeData, noLaunch, launchAfterInstall);
                 ui.Run(window);
+                if (externalHelper && targetDir is not null)
+                    UninstallBootstrap.WriteResult(targetDir, window.ExitCode == 0,
+                        window.ExitCode == 0 ? "Uninstall completed." : "Uninstall was canceled or did not complete.");
                 return window.ExitCode;
             }
 
@@ -66,6 +93,8 @@ internal static class Program
                     Log: Log);
 
                 InstallerEngine.UninstallAsync(uninstallOptions).GetAwaiter().GetResult();
+                if (externalHelper && targetDir is not null)
+                    UninstallBootstrap.WriteResult(targetDir, true, "Uninstall completed.");
                 return 0;
             }
 
@@ -85,11 +114,15 @@ internal static class Program
         catch (SpeedMeterRunningException ex)
         {
             Log($"[ERROR] {ex.Message}");
+            if (externalHelper && targetDir is not null)
+                UninstallBootstrap.WriteResult(targetDir, false, ex.Message);
             return 1618;
         }
         catch (Exception ex)
         {
             Log($"[FATAL ERROR] {ex.Message}");
+            if (externalHelper && targetDir is not null)
+                UninstallBootstrap.WriteResult(targetDir, false, ex.Message);
             return 1;
         }
     }

@@ -1,6 +1,6 @@
 param(
     [string]$Configuration = 'Release',
-    [string]$Version = '1.0.0-rc.3',
+    [string]$Version = '1.0.0-rc.4',
     [string]$Runtime = 'win-x64',
     [ValidateSet('Production', 'Test')][string]$SignMode = 'Test'
 )

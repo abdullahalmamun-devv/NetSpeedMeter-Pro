@@ -83,7 +83,7 @@ public static class ConsumerUpdateFixtures
         UpdateTrustAnchor.SetPinnedPublicKeyForTesting(attacker);
         try
         {
-            var manifest = new UpdateManifest(1, "SpeedMeterPro", "rc", "1.0.0-rc.4",
+            var manifest = new UpdateManifest(1, "SpeedMeterPro", "rc", "1.0.0-rc.5",
                 DateTimeOffset.UtcNow, "1.0.0-rc.2", "https://github.com/example/setup.exe",
                 new string('a', 64), 1000, 3, "https://github.com/example/notes", UpdateTrustAnchor.ExpectedPublisher, "");
             var bytes = UpdateVerificationService.GetCanonicalManifestBytes(manifest);
@@ -117,7 +117,7 @@ public static class ConsumerUpdateFixtures
     {
         foreach (var (version, expected) in new[]
         {
-            ("1.0.0-rc.4", UpdateState.Available),
+            ("1.0.0-rc.5", UpdateState.Available),
             (ProductIdentity.ProductVersion, UpdateState.UpToDate),
             ("1.0.0-rc.1", UpdateState.UpToDate)
         })
@@ -134,7 +134,7 @@ public static class ConsumerUpdateFixtures
     private static void TamperedServiceManifest()
     {
         using var fixture = new UpdateFixture();
-        fixture.ServeSignedRelease("1.0.0-rc.4", tamperVersionAfterSigning: true);
+        fixture.ServeSignedRelease("1.0.0-rc.5", tamperVersionAfterSigning: true);
         var result = fixture.Service.CheckAsync(manual: true).GetAwaiter().GetResult();
         Require(result.State == UpdateState.Failed && fixture.Settings.CurrentSettings.LastSuccessfulUpdateCheckUtc is null,
             "Tampered manifest was accepted by consumer service.");
@@ -145,7 +145,7 @@ public static class ConsumerUpdateFixtures
         foreach (var mismatch in new[] { "hash", "size" })
         {
             using var fixture = new UpdateFixture();
-            fixture.ServeSignedRelease("1.0.0-rc.4", mismatch: mismatch);
+            fixture.ServeSignedRelease("1.0.0-rc.5", mismatch: mismatch);
             Require(fixture.Service.CheckAsync(manual: true).GetAwaiter().GetResult().State == UpdateState.Available,
                 "Signed update was not offered before package test.");
             var result = fixture.Service.DownloadAndVerifyAsync().GetAwaiter().GetResult();
@@ -158,7 +158,7 @@ public static class ConsumerUpdateFixtures
     private static void CancelDownload()
     {
         using var fixture = new UpdateFixture();
-        fixture.ServeSignedRelease("1.0.0-rc.4", slowPackage: true);
+        fixture.ServeSignedRelease("1.0.0-rc.5", slowPackage: true);
         Require(fixture.Service.CheckAsync(manual: true).GetAwaiter().GetResult().State == UpdateState.Available,
             "Signed update was not offered before cancellation test.");
         using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
@@ -170,7 +170,7 @@ public static class ConsumerUpdateFixtures
     private static void ReadyStateAndRestartCleanup()
     {
         using var fixture = new UpdateFixture();
-        fixture.ServeSignedRelease("1.0.0-rc.4");
+        fixture.ServeSignedRelease("1.0.0-rc.5");
         Require(fixture.Service.CheckAsync(manual: true).GetAwaiter().GetResult().State == UpdateState.Available,
             "Signed update was not offered.");
         var ready = fixture.Service.DownloadAndVerifyAsync().GetAwaiter().GetResult();
@@ -189,7 +189,7 @@ public static class ConsumerUpdateFixtures
         if (!OperatingSystem.IsWindows()) throw new SkipCheckException("WinVerifyTrust requires Windows.");
         var signedPe = FindSignedFixturePe();
         using var fixture = new UpdateFixture();
-        fixture.ServeSignedPackageFile("1.0.0-rc.4", signedPe);
+        fixture.ServeSignedPackageFile("1.0.0-rc.5", signedPe);
         string? launchedPath = null;
         IReadOnlyList<string>? launchedArguments = null;
         var deniedWriteWhileLaunching = false;
@@ -223,7 +223,7 @@ public static class ConsumerUpdateFixtures
         if (!OperatingSystem.IsWindows()) throw new SkipCheckException("WinVerifyTrust requires Windows.");
         var signedPe = FindSignedFixturePe();
         using var fixture = new UpdateFixture();
-        fixture.ServeSignedPackageFile("1.0.0-rc.4", signedPe);
+        fixture.ServeSignedPackageFile("1.0.0-rc.5", signedPe);
         var launches = 0;
         using var service = fixture.CreateRealVerifierService((_, _) => launches++);
         Require(service.CheckAsync(manual: true).GetAwaiter().GetResult().State == UpdateState.Available,
@@ -244,7 +244,7 @@ public static class ConsumerUpdateFixtures
         var loopbackManifest = new Uri("http://127.0.0.1:34567/updates/rc.json");
         using (var fixture = new UpdateFixture(loopbackManifest))
         {
-            fixture.ServeSignedRelease("1.0.0-rc.4");
+            fixture.ServeSignedRelease("1.0.0-rc.5");
             Require(fixture.Service.CheckAsync(manual: true).GetAwaiter().GetResult().State == UpdateState.Available,
                 "Signed loopback manifest was not offered in the lab seam.");
             Require(fixture.Service.DownloadAndVerifyAsync().GetAwaiter().GetResult().State == UpdateState.ReadyToInstall,
@@ -252,7 +252,7 @@ public static class ConsumerUpdateFixtures
         }
         using (var fixture = new UpdateFixture(loopbackManifest))
         {
-            fixture.ServeSignedRelease("1.0.0-rc.4");
+            fixture.ServeSignedRelease("1.0.0-rc.5");
             var original = fixture.Handler.ResponseFactory!;
             fixture.Handler.ResponseFactory = async (request, token) =>
             {
@@ -364,7 +364,7 @@ public static class ConsumerUpdateFixtures
                 UpdateTrustAnchor.ExpectedPublisher, "");
             var bytes = UpdateVerificationService.GetCanonicalManifestBytes(manifest);
             manifest = manifest with { Signature = Convert.ToBase64String(signingKey.SignData(bytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)) };
-            if (tamperVersionAfterSigning) manifest = manifest with { Version = "1.0.0-rc.5" };
+            if (tamperVersionAfterSigning) manifest = manifest with { Version = "1.0.0-rc.6" };
             var json = JsonSerializer.Serialize(manifest);
             Handler.ResponseFactory = (request, _) =>
             {

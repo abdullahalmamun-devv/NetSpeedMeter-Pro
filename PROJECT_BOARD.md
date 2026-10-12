@@ -15,6 +15,8 @@
 
 # In progress
 
+RC.4 native safety and consumer evidence closure is underway. The current release candidate remains RC.3 until a clean-source RC.4 package and native observations are verified; Gate E2 stays blocked.
+
 | Task | Owner | Reviewer | Dependency | Acceptance |
 |---|---|---|---|---|
 | V1-CONS-UPDATE-001 | Update/Application + UI | Security, Accessibility, QA, Director | Gate E1, ADR-014 | Opt-in daily GitHub signed-manifest checks, manual check, secure one-click update and restart |
@@ -25,6 +27,10 @@
 | V1-CONS-UPDATE-DRILL-002 | Update/Application + Director | Security, QA | Guarded lab root, updater-capable RC.2 seed | Observe RC.2 app → signed DevelopmentTest manifest → newer RC.3 Setup → restart and data preservation |
 | V1-CONS-ACCESS-NATIVE-002 | Accessibility | Director, QA | Isolated native app and installer | Keyboard, Narrator, contrast and scaling observations on consumer surfaces |
 | V1-CONS-PROVENANCE-002 | Director/Release | QA, Security | Verified source and evidence | Normal Git push, remote SHA agreement and RC.3 field-candidate evidence |
+| V1-CONS-SAFETY-003 | Windows Installer | Independent Security/Privacy, Director | RC.3 closure defects | Managed out-of-tree uninstall, owned-path revalidation, checked purge quarantine and truthful residual UX |
+| V1-CONS-QA-003 | QA | Security/Privacy, Director | Safety helper contract | Disposable-root negative and attack fixtures; executable runner evidence |
+| V1-CONS-RELEASE-003 | Release/Build | Security/Privacy, Director | Safety implementation and clean source | RC.4 package, safe release cleanup, size/provenance evidence |
+| V1-CONS-FIELD-PREGATE-003 | Director | Accessibility, Security/Privacy | RC.4 source push and package | Native Installed Apps, keep/purge, crash, accessibility, privacy and update-consent observations |
 
 # Queued behind RC.2 consumer closure
 

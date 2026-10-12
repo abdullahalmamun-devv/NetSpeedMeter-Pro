@@ -2,6 +2,7 @@
 
 **Current release:** 1.0.0-rc.3 is the latest packaged, test-signed field candidate, built from clean `ReleaseSourceSha` `1badfde9e3e79770195b63e843e506e79a6ebd3f`. It is not a public production release. RC.1/RC.2 evidence remains preserved. GA remains blocked.
 **Current milestone:** Gate E1 passed. RC.2/RC.3 consumer experience and safety closure is **NOT VERIFIED**; Gate E2 field validation is blocked. The isolated RC.2 lab → RC.3 signed DevelopmentTest one-click update/restart/data-preservation drill succeeded, but independent security acceptance, native accessibility, Installed Apps/purge/reinstall, packaged crash, packet/process privacy, public hosting and production signing remain open. See `docs/evidence/CONSUMER-CLOSURE-RC3.md`.
+**RC.4 work in progress:** Managed uninstall/purge safety, test fixtures, release scripts and a sentinelled controlled-crash harness are under integration. RC.4 is not yet a packaged candidate. The user authorized native testing in the current Windows profile with exact SpeedMeter-owned targets after verified source commit/push. No Gate E2 work has started.
 **Updated:** 12 October 2026 (Asia/Dhaka).
 
 ## Build / test status
