@@ -1,6 +1,6 @@
 param(
     [string]$Configuration = 'Release',
-    [string]$Version = '1.0.0-rc.1',
+    [string]$Version = '1.0.0-rc.2',
     [string]$Runtime = 'win-x64',
     [ValidateSet('Production', 'Test')][string]$SignMode = 'Test'
 )
@@ -12,7 +12,14 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 Write-Host "=== SpeedMeter Pro Release Packaging ($Version - $Runtime) ===" -ForegroundColor Cyan
 Write-Host "Sign Mode: $SignMode" -ForegroundColor $(if ($SignMode -eq 'Production') { 'Magenta' } else { 'Yellow' })
 
-$releaseRoot = Join-Path $projectRoot 'artifacts\release'
+if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)?$') {
+    throw 'Version contains unsupported path characters.'
+}
+$releaseParent = [System.IO.Path]::GetFullPath((Join-Path $projectRoot 'artifacts\release'))
+$releaseRoot = [System.IO.Path]::GetFullPath((Join-Path $releaseParent $Version))
+if (-not $releaseRoot.StartsWith($releaseParent + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Release output escaped the product release directory.'
+}
 if (Test-Path -LiteralPath $releaseRoot) {
     Remove-Item -LiteralPath $releaseRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -162,7 +169,7 @@ if (-not (Test-Path -LiteralPath $uninstallRegKey)) {
 }
 
 Set-ItemProperty -Path $uninstallRegKey -Name 'DisplayName' -Value $appName -Type String
-Set-ItemProperty -Path $uninstallRegKey -Name 'DisplayVersion' -Value '1.0.0-rc.1' -Type String
+Set-ItemProperty -Path $uninstallRegKey -Name 'DisplayVersion' -Value '1.0.0-rc.2' -Type String
 Set-ItemProperty -Path $uninstallRegKey -Name 'Publisher' -Value 'SpeedMeter Pro' -Type String
 Set-ItemProperty -Path $uninstallRegKey -Name 'InstallLocation' -Value $installDir -Type String
 Set-ItemProperty -Path $uninstallRegKey -Name 'DisplayIcon' -Value "$exePath,0" -Type String
@@ -283,7 +290,7 @@ if (-not $Silent) {
 '@
 
     $readmeContent = @"
-SpeedMeter Pro 1.0.0-rc.1 (Release Candidate)
+SpeedMeter Pro 1.0.0-rc.2 (Release Candidate)
 ==============================================
 
 Precision Network Performance Monitor for Windows 10/11 x64.
@@ -292,7 +299,7 @@ Standard-user desktop application with zero cloud dependencies and zero accounts
 DISTRIBUTION NOTICE (ADR-012):
 ------------------------------
 SpeedMeter Pro is distributed primarily as a standalone canonical installer
-(SpeedMeterPro-1.0.0-rc.1-Setup.exe).
+(SpeedMeterPro-1.0.0-rc.2-Setup.exe).
 
 ZIP archives are non-public secondary diagnostic/enterprise archives intended
 strictly for administrative evaluation, testing, and managed enterprise deployment.
@@ -301,9 +308,9 @@ They are NOT supported public portable consumer distributions.
 INSTALLATION & DEPLOYMENT:
 --------------------------
 1. Standalone Canonical Installer (Primary):
-   Run SpeedMeterPro-1.0.0-rc.1-Setup.exe
+   Run SpeedMeterPro-1.0.0-rc.2-Setup.exe
    Interactive GUI setup or silent command line:
-   SpeedMeterPro-1.0.0-rc.1-Setup.exe /S
+   SpeedMeterPro-1.0.0-rc.2-Setup.exe /S
 
 2. Enterprise / Scripted Deployment:
    Run Install.ps1 with PowerShell from this diagnostic archive:
@@ -355,7 +362,7 @@ Compress-Archive -Path "$scDir\*" -DestinationPath $scZip -CompressionLevel Opti
 Write-Host "Creating Framework-Dependent ZIP archive: $fddZip..." -ForegroundColor Yellow
 Compress-Archive -Path "$fddDir\*" -DestinationPath $fddZip -CompressionLevel Optimal
 
-# 6. Build and Publish Standalone Canonical Installer (SpeedMeterPro-1.0.0-rc.1-Setup.exe)
+# 6. Build and Publish Standalone Canonical Installer (SpeedMeterPro-1.0.0-rc.2-Setup.exe)
 Write-Host "Building standalone canonical installer (SpeedMeterPro-$Version-Setup.exe)..." -ForegroundColor Yellow
 $setupPublishDir = Join-Path $releaseRoot 'tmp_setup_build'
 if (Test-Path -LiteralPath $setupPublishDir) {

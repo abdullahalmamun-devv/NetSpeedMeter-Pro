@@ -1,19 +1,23 @@
 using System;
 using System.IO;
 using System.Reflection;
-using System.Threading.Tasks;
+using System.Windows;
 using SpeedMeter.Core;
 
 namespace SpeedMeter.Installer;
 
 internal static class Program
 {
-    public static async Task<int> Main(string[] args)
+    [STAThread]
+    public static int Main(string[] args)
     {
         var isUninstall = HasArg(args, "-Uninstall", "/UNINSTALL", "-u", "/u");
         var isSilent = HasArg(args, "-Silent", "/SILENT", "-s", "/s", "-S", "/S", "/qn", "-qn");
         var purgeData = HasArg(args, "-PurgeUserData", "/PURGE", "-purge", "/purge");
         var noLaunch = HasArg(args, "-NoLaunch", "/NOLAUNCH", "-nolaunch", "/nolaunch");
+        var launchAfterInstall = HasArg(args, "-LaunchAfterInstall", "/LAUNCHAFTERINSTALL");
+        var desktopShortcut = HasArg(args, "-DesktopShortcut", "/DESKTOPSHORTCUT");
+        var startWithWindows = HasArg(args, "-StartWithWindows", "/STARTWITHWINDOWS");
         var payloadPath = GetArgValue(args, "-Payload", "/PAYLOAD", "-payload");
         var targetDir = GetArgValue(args, "-Dir", "/DIR", "-TargetDir", "-dir", "/dir");
 
@@ -27,6 +31,32 @@ internal static class Program
 
         try
         {
+            Stream? payloadStream = null;
+            if (!isUninstall)
+            {
+                // The same embedded or sidecar payload is used by interactive and silent setup.
+                var asm = Assembly.GetExecutingAssembly();
+                payloadStream = asm.GetManifestResourceStream("payload.zip");
+                if (payloadStream is null && string.IsNullOrWhiteSpace(payloadPath))
+                {
+                    var baseDir = AppContext.BaseDirectory;
+                    var sidecar1 = Path.Combine(baseDir, "payload.zip");
+                    var sidecar2 = Path.Combine(baseDir, $"SpeedMeterPro-{ProductIdentity.ProductVersion}-win-x64.zip");
+                    if (File.Exists(sidecar1)) payloadPath = sidecar1;
+                    else if (File.Exists(sidecar2)) payloadPath = sidecar2;
+                }
+            }
+
+            if (!isSilent)
+            {
+                var ui = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
+                var window = new InstallerWindow(
+                    isUninstall, targetDir, payloadPath, payloadStream,
+                    purgeData, noLaunch, launchAfterInstall);
+                ui.Run(window);
+                return window.ExitCode;
+            }
+
             if (isUninstall)
             {
                 var uninstallOptions = new UninstallOptions(
@@ -35,28 +65,8 @@ internal static class Program
                     Silent: isSilent,
                     Log: Log);
 
-                await InstallerEngine.UninstallAsync(uninstallOptions);
+                InstallerEngine.UninstallAsync(uninstallOptions).GetAwaiter().GetResult();
                 return 0;
-            }
-
-            // Installation mode
-            Stream? payloadStream = null;
-
-            // 1. Check embedded resource
-            var asm = Assembly.GetExecutingAssembly();
-            var resourceStream = asm.GetManifestResourceStream("payload.zip");
-            if (resourceStream is not null)
-            {
-                payloadStream = resourceStream;
-            }
-            else if (string.IsNullOrWhiteSpace(payloadPath))
-            {
-                // 2. Check sidecar payload in same directory
-                var baseDir = AppContext.BaseDirectory;
-                var sidecar1 = Path.Combine(baseDir, "payload.zip");
-                var sidecar2 = Path.Combine(baseDir, $"SpeedMeterPro-{ProductIdentity.ProductVersion}-win-x64.zip");
-                if (File.Exists(sidecar1)) payloadPath = sidecar1;
-                else if (File.Exists(sidecar2)) payloadPath = sidecar2;
             }
 
             var installOptions = new InstallOptions(
@@ -64,11 +74,12 @@ internal static class Program
                 PayloadZipPath: payloadPath,
                 PayloadStream: payloadStream,
                 Silent: isSilent,
-                LaunchAfterInstall: !noLaunch && !isSilent,
-                CreateDesktopShortcut: true,
+                LaunchAfterInstall: launchAfterInstall && !noLaunch,
+                CreateDesktopShortcut: desktopShortcut ? true : null,
+                StartWithWindows: startWithWindows ? true : null,
                 Log: Log);
 
-            await InstallerEngine.InstallAsync(installOptions);
+            InstallerEngine.InstallAsync(installOptions).GetAwaiter().GetResult();
             return 0;
         }
         catch (SpeedMeterRunningException ex)

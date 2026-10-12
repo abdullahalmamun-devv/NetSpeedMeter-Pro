@@ -1,7 +1,7 @@
 # SpeedMeter Pro Privacy Policy & Data Architecture
 
 **Effective Date:** October 12, 2026  
-**Product Version:** 1.0.0-rc.1  
+**Product Version:** 1.0.0-rc.2
 **Architecture:** Local-First Windows Desktop Software  
 
 ---
@@ -33,7 +33,7 @@ All network speed, byte volume, and adapter monitoring take place purely within 
 
 ## 3. Remote Network Operations (Strict Opt-In)
 
-The core monitoring engine runs completely offline. Only two optional features can generate outbound network traffic, and both operate under explicit user control:
+The core monitoring engine runs completely offline. Optional features that can generate outbound network traffic remain under user control:
 
 ### A. Connectivity Probes (Internet Reachability & Ping)
 - **Default State:** Disabled by default.
@@ -76,15 +76,24 @@ To assist with local troubleshooting, SpeedMeter Pro maintains a bounded rolling
 
 SpeedMeter Pro checks for updates only when explicitly configured by the user:
 
+- **Automatic checks:** Off until the user knowingly enables them in first run or Settings. When enabled, checks use a GitHub-hosted HTTPS manifest at most once per 24 hours after a successful check. GitHub receives ordinary request metadata such as source IP and user agent; no usage history is sent.
+- **Manual checks:** Pressing **Check for updates** makes one explicit request regardless of the automatic setting.
+- **Downloads:** The installer is downloaded only after the user chooses **Update now**. There is no unattended download or installation.
 - **Manifest Integrity:** Update manifests are cryptographically signed using RSA-SHA256. Unsigned or tampered manifests are rejected.
 - **Authenticode Verification:** All downloaded binaries are verified against the authoritative code-signing certificate and SHA-256 package checksum before extraction.
 - **Zero Silent Installation:** Updates are never executed silently without user confirmation.
 
+Production update manifest signing material and production Authenticode signing are external release dependencies for RC.2. A test-signed field/lab package is not a publicly trusted GA update.
+
+## 7. Local crash records
+
+Fatal failures may create bounded, redacted diagnostics under `%LocalAppData%\SpeedMeterPro\crashes\`. The next launch may offer to view or save a report. **Report issue** opens a GitHub issue page in your browser with limited version/build metadata; no diagnostic file is uploaded automatically. Saving a report works without GitHub.
+
 ---
 
-## 7. Data Removal & Uninstallation
+## 8. Data Removal & Uninstallation
 
-SpeedMeter Pro provides full uninstallation control via `Uninstall.ps1` or the Windows Apps settings page:
+SpeedMeter Pro provides uninstallation through Windows **Settings → Apps → Installed apps**:
 
 - **Default Uninstall:** Removes application binaries, shortcuts, and registry keys while preserving your historical database in `%LocalAppData%\SpeedMeterPro\` so that your data is not lost if you choose to reinstall later.
-- **Complete Purge (`-PurgeUserData`):** Permanently deletes all application files, settings, and the historical SQLite database from the system with zero lingering remnants.
+- **Complete Purge:** An explicit choice and confirmation permanently delete local data, including the historical SQLite database and crash records.

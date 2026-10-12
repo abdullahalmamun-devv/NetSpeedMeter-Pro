@@ -27,7 +27,7 @@
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="Color Theme:" VerticalAlignment="Top" Margin="0,4,0,0" Foreground="{StaticResource TextSecondaryBrush}" />
                         <StackPanel Grid.Column="1">
-                            <ComboBox SelectedValue="{Binding Theme}" SelectedValuePath="Tag" Width="220" HorizontalAlignment="Left">
+                            <ComboBox SelectedValue="{Binding Theme}" SelectedValuePath="Tag" Width="220" HorizontalAlignment="Left" AutomationProperties.Name="Color theme">
                                 <ComboBoxItem Content="Dark (Default)" Tag="Dark" />
                                 <ComboBoxItem Content="Light" Tag="Light" />
                                 <ComboBoxItem Content="System (Follows Windows)" Tag="System" />
@@ -68,7 +68,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="Sampling Interval:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
-                        <ComboBox Grid.Column="1" SelectedValue="{Binding Interval}" SelectedValuePath="Tag" Width="220" HorizontalAlignment="Left">
+                        <ComboBox Grid.Column="1" SelectedValue="{Binding Interval}" SelectedValuePath="Tag" Width="220" HorizontalAlignment="Left" AutomationProperties.Name="Sampling interval">
                             <ComboBoxItem Content="0.5 seconds (High precision)" Tag="0.5" />
                             <ComboBoxItem Content="1.0 second (Standard default)" Tag="1.0" />
                             <ComboBoxItem Content="2.0 seconds (Low resource)" Tag="2.0" />
@@ -81,7 +81,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="Reporting Timezone:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
-                        <ComboBox Grid.Column="1" ItemsSource="{Binding AvailableTimezones}" SelectedItem="{Binding SelectedTimezoneId}" Width="320" HorizontalAlignment="Left" />
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding AvailableTimezones}" SelectedItem="{Binding SelectedTimezoneId}" Width="320" HorizontalAlignment="Left" AutomationProperties.Name="Reporting timezone" />
                     </Grid>
 
                     <Grid Margin="0,0,0,12">
@@ -90,7 +90,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="Billing Cycle Start Day:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
-                        <TextBox Grid.Column="1" Text="{Binding BillingCycleDay, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Left" />
+                        <TextBox Grid.Column="1" Text="{Binding BillingCycleDay, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Left" AutomationProperties.Name="Billing cycle start day" />
                     </Grid>
 
                     <Grid Margin="0,0,0,4">
@@ -115,7 +115,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="Layout Style:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
-                        <ComboBox Grid.Column="1" SelectedValue="{Binding WidgetLayout}" SelectedValuePath="Tag" Width="220" HorizontalAlignment="Left">
+                        <ComboBox Grid.Column="1" SelectedValue="{Binding WidgetLayout}" SelectedValuePath="Tag" Width="220" HorizontalAlignment="Left" AutomationProperties.Name="Widget layout style">
                             <ComboBoxItem Content="Minimal (Rates only)" Tag="Minimal" />
                             <ComboBoxItem Content="Compact Graph" Tag="CompactGraph" />
                             <ComboBoxItem Content="Detailed (Rates + Graph + Adapter)" Tag="Detailed" />
@@ -130,7 +130,7 @@
                         <TextBlock Text="Widget Opacity:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
                         <DockPanel Grid.Column="1" MaxWidth="300" HorizontalAlignment="Left">
                             <TextBlock Text="{Binding WidgetOpacity, StringFormat='{}{0:P0}'}" Width="45" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" DockPanel.Dock="Right" />
-                            <Slider Minimum="0.2" Maximum="1.0" Value="{Binding WidgetOpacity}" TickFrequency="0.1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Margin="0,0,10,0" Width="180" />
+                            <Slider Minimum="0.2" Maximum="1.0" Value="{Binding WidgetOpacity}" TickFrequency="0.1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Margin="0,0,10,0" Width="180" AutomationProperties.Name="Widget opacity" />
                         </DockPanel>
                     </Grid>
 
@@ -154,7 +154,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="Retention Policy:" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
-                        <ComboBox Grid.Column="1" SelectedValue="{Binding DataRetentionDays}" SelectedValuePath="Tag" Width="220" HorizontalAlignment="Left">
+                        <ComboBox Grid.Column="1" SelectedValue="{Binding DataRetentionDays}" SelectedValuePath="Tag" Width="220" HorizontalAlignment="Left" AutomationProperties.Name="Data retention policy">
                             <ComboBoxItem Content="Keep indefinitely (Default)" Tag="0" />
                             <ComboBoxItem Content="Retain 30 days" Tag="30" />
                             <ComboBoxItem Content="Retain 90 days" Tag="90" />
@@ -183,7 +183,30 @@
                 </StackPanel>
             </Border>
 
-            <!-- 6. Action Buttons Bar -->
+            <!-- 6. Updates Card -->
+            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="22" Margin="0,0,0,18">
+                <StackPanel>
+                    <TextBlock Text="Updates" FontSize="{StaticResource FontSizeSubheading}" FontWeight="SemiBold" Margin="0,0,0,12" />
+                    <CheckBox Content="Automatically check for SpeedMeter Pro updates" IsChecked="{Binding AutoUpdateCheckEnabled}" Foreground="{StaticResource TextPrimaryBrush}" AutomationProperties.Name="Automatically check for SpeedMeter Pro updates" />
+                    <TextBlock Text="When enabled, checks GitHub at most once per day. GitHub can see your source IP and standard request headers. No package downloads automatically."
+                               TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource FontSizeBodySmall}" Margin="20,6,0,12" />
+                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8">
+                        <Run Text="Current version: " /><Run Text="{Binding CurrentVersion, Mode=OneWay}" /><Run Text="    Channel: " /><Run Text="{Binding UpdateChannel, Mode=OneWay}" />
+                    </TextBlock>
+                    <TextBlock Text="{Binding UpdateStatus.Message}" TextWrapping="Wrap" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,8" AutomationProperties.LiveSetting="Polite" />
+                    <TextBlock Text="{Binding UpdateSize}" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8" />
+                    <ProgressBar Minimum="0" Maximum="100" Value="{Binding UpdateProgress, Mode=OneWay}" Height="8" Margin="0,0,0,12" AutomationProperties.Name="Update download progress" />
+                    <WrapPanel>
+                        <Button Content="Check for updates" Command="{Binding CheckForUpdatesCommand}" Margin="0,0,8,8" />
+                        <Button Content="Update now" Command="{Binding UpdateNowCommand}" IsEnabled="{Binding CanUpdateNow}" Margin="0,0,8,8" />
+                        <Button Content="Later" Command="{Binding LaterCommand}" Margin="0,0,8,8" />
+                        <Button Content="Release notes" Command="{Binding OpenReleaseNotesCommand}" IsEnabled="{Binding UpdateAvailable}" Margin="0,0,8,8" />
+                        <Button Content="Cancel download" Command="{Binding CancelUpdateCommand}" IsEnabled="{Binding UpdateBusy}" Margin="0,0,8,8" />
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- 7. Action Buttons Bar -->
             <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource PanelCornerRadius}" Padding="16,12">
                 <DockPanel>
                     <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource StatusSuccessBrush}" VerticalAlignment="Center" FontSize="12" Margin="16,0,0,0" DockPanel.Dock="Right" TextWrapping="Wrap" />

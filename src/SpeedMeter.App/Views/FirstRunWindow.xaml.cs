@@ -17,7 +17,18 @@ public partial class FirstRunWindow : Window
 
         InitializeComponent();
 
+        // Bound the resizable introduction to the current work area at high DPI and on small screens.
+        var availableWidth = Math.Max(1, SystemParameters.WorkArea.Width - 24);
+        var availableHeight = Math.Max(1, SystemParameters.WorkArea.Height - 24);
+        MinWidth = Math.Min(MinWidth, availableWidth);
+        MinHeight = Math.Min(MinHeight, availableHeight);
+        MaxWidth = availableWidth;
+        MaxHeight = availableHeight;
+        Width = Math.Min(Width, MaxWidth);
+        Height = Math.Min(Height, MaxHeight);
+
         EnableChecksCheckBox.IsChecked = settings.ConnectionChecksEnabled;
+        AutoUpdateCheckBox.IsChecked = settings.AutoUpdateCheckEnabled;
         ThemePicker.SelectedIndex = settings.Theme switch
         {
             "Light" => 1,
@@ -31,6 +42,7 @@ public partial class FirstRunWindow : Window
     {
         settings.FirstRunCompleted = true;
         settings.ConnectionChecksEnabled = EnableChecksCheckBox.IsChecked == true;
+        settings.AutoUpdateCheckEnabled = AutoUpdateCheckBox.IsChecked == true;
 
         settings.Theme = ThemePicker.SelectedIndex switch
         {

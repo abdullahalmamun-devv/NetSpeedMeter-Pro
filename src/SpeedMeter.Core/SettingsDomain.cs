@@ -91,6 +91,15 @@ public sealed class SpeedMeterSettings
     [JsonPropertyName("firstRunCompleted")]
     public bool FirstRunCompleted { get; set; } = false;
 
+    [JsonPropertyName("autoUpdateCheckEnabled")]
+    public bool AutoUpdateCheckEnabled { get; set; } = false;
+
+    [JsonPropertyName("lastSuccessfulUpdateCheckUtc")]
+    public DateTimeOffset? LastSuccessfulUpdateCheckUtc { get; set; }
+
+    [JsonPropertyName("lastUpdateCheckAttemptUtc")]
+    public DateTimeOffset? LastUpdateCheckAttemptUtc { get; set; }
+
     [JsonPropertyName("idleDimmingEnabled")]
     public bool IdleDimmingEnabled { get; set; } = false;
 
@@ -112,6 +121,8 @@ public sealed class SpeedMeterSettings
     public void Sanitize()
     {
         if (SchemaVersion <= 0) SchemaVersion = CurrentSchemaVersion;
+        if (LastSuccessfulUpdateCheckUtc > DateTimeOffset.UtcNow.AddMinutes(5)) LastSuccessfulUpdateCheckUtc = null;
+        if (LastUpdateCheckAttemptUtc > DateTimeOffset.UtcNow.AddMinutes(5)) LastUpdateCheckAttemptUtc = null;
 
         // Theme bounds
         if (Theme != "Dark" && Theme != "Light" && Theme != "System")

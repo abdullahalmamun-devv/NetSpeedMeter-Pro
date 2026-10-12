@@ -2,6 +2,8 @@ using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
@@ -17,6 +19,8 @@ public sealed class SettingsViewModel : ViewModelBase
     private readonly ISettingsService settingsService;
     private readonly IUsageHistoryService? historyService;
     private readonly IConfigExportImportService? configService;
+    private readonly IUpdateService updateService;
+    private CancellationTokenSource? updateCancellation;
 
     private string theme = "Dark";
     private bool bits;
@@ -35,6 +39,8 @@ public sealed class SettingsViewModel : ViewModelBase
     private bool startWithWindows;
     private int dataRetentionDays = 0;
     private string? statusMessage;
+    private bool autoUpdateCheckEnabled;
+    private UpdateStatus updateStatus = new(UpdateState.Idle, "Updates have not been checked.");
 
     public string Theme { get => theme; set => SetProperty(ref theme, value); }
     public bool Bits { get => bits; set => SetProperty(ref bits, value); }
@@ -53,6 +59,15 @@ public sealed class SettingsViewModel : ViewModelBase
     public bool StartWithWindows { get => startWithWindows; set => SetProperty(ref startWithWindows, value); }
     public int DataRetentionDays { get => dataRetentionDays; set => SetProperty(ref dataRetentionDays, value); }
     public string? StatusMessage { get => statusMessage; private set => SetProperty(ref statusMessage, value); }
+    public bool AutoUpdateCheckEnabled { get => autoUpdateCheckEnabled; set => SetProperty(ref autoUpdateCheckEnabled, value); }
+    public UpdateStatus UpdateStatus { get => updateStatus; private set => SetProperty(ref updateStatus, value); }
+    public string CurrentVersion => ProductIdentity.ProductVersion;
+    public string UpdateChannel => ProductIdentity.ReleaseChannel == "rc" ? "Release Candidate" : "Stable";
+    public bool UpdateAvailable => UpdateStatus.State is UpdateState.Available or UpdateState.Downloading or UpdateState.Verifying or UpdateState.ReadyToInstall;
+    public bool CanUpdateNow => UpdateStatus.State is UpdateState.Available or UpdateState.ReadyToInstall;
+    public bool UpdateBusy => UpdateStatus.State is UpdateState.Checking or UpdateState.Downloading or UpdateState.Verifying;
+    public double UpdateProgress => UpdateStatus.TotalBytes > 0 ? 100.0 * UpdateStatus.DownloadedBytes / UpdateStatus.TotalBytes : 0;
+    public string UpdateSize => UpdateStatus.Manifest is { } m ? $"Download size: {m.PackageSizeBytes / 1024d / 1024d:0.0} MB" : "";
 
     public ObservableCollection<string> AvailableTimezones { get; } = [];
 
@@ -62,15 +77,24 @@ public sealed class SettingsViewModel : ViewModelBase
     public ICommand ClearAllHistoryCommand { get; }
     public ICommand ExportConfigCommand { get; }
     public ICommand ImportConfigCommand { get; }
+    public ICommand CheckForUpdatesCommand { get; }
+    public ICommand UpdateNowCommand { get; }
+    public ICommand LaterCommand { get; }
+    public ICommand OpenReleaseNotesCommand { get; }
+    public ICommand CancelUpdateCommand { get; }
 
     public SettingsViewModel(
         ISettingsService settingsService,
         IUsageHistoryService? historyService = null,
-        IConfigExportImportService? configService = null)
+        IConfigExportImportService? configService = null,
+        IUpdateService? updateService = null)
     {
         this.settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
         this.historyService = historyService;
         this.configService = configService;
+        this.updateService = updateService ?? new UpdateService(settingsService);
+        this.updateService.StatusChanged += OnUpdateStatusChanged;
+        settingsService.SettingsChanged += OnSettingsChangedForUpdates;
 
         foreach (var tz in TimeZoneInfo.GetSystemTimeZones())
         {
@@ -85,6 +109,73 @@ public sealed class SettingsViewModel : ViewModelBase
         ClearAllHistoryCommand = new RelayCommand(async () => await ClearAllHistoryAsync());
         ExportConfigCommand = new RelayCommand(ExportConfig);
         ImportConfigCommand = new RelayCommand(ImportConfig);
+        CheckForUpdatesCommand = new RelayCommand(async () => await CheckForUpdatesAsync());
+        UpdateNowCommand = new RelayCommand(async () => await UpdateNowAsync());
+        LaterCommand = new RelayCommand(() => StatusMessage = "Update deferred. You can install it later from Settings.");
+        OpenReleaseNotesCommand = new RelayCommand(OpenReleaseNotes);
+        CancelUpdateCommand = new RelayCommand(() => updateCancellation?.Cancel());
+
+        // The service itself enforces consent and cadence before any network operation.
+        _ = CheckAutomaticallyAsync();
+    }
+
+    private void OnSettingsChangedForUpdates(SpeedMeterSettings changed)
+    {
+        if (changed.AutoUpdateCheckEnabled && updateService.Status.State is not
+            (UpdateState.Checking or UpdateState.Downloading or UpdateState.Verifying))
+            _ = CheckAutomaticallyAsync();
+    }
+
+    private async Task CheckAutomaticallyAsync()
+    {
+        try { await updateService.CheckAsync(manual: false); }
+        catch { /* Update service reports consumer-safe state. */ }
+    }
+
+    private void OnUpdateStatusChanged(UpdateStatus next)
+    {
+        void Apply()
+        {
+            UpdateStatus = next;
+            OnPropertyChanged(nameof(UpdateAvailable));
+            OnPropertyChanged(nameof(CanUpdateNow));
+            OnPropertyChanged(nameof(UpdateBusy));
+            OnPropertyChanged(nameof(UpdateProgress));
+            OnPropertyChanged(nameof(UpdateSize));
+        }
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess()) dispatcher.BeginInvoke((Action)Apply);
+        else Apply();
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        if (UpdateBusy) return;
+        updateCancellation?.Dispose();
+        updateCancellation = new CancellationTokenSource();
+        await updateService.CheckAsync(manual: true, updateCancellation.Token);
+    }
+
+    private async Task UpdateNowAsync()
+    {
+        if (UpdateBusy || !UpdateAvailable) return;
+        updateCancellation?.Dispose();
+        updateCancellation = new CancellationTokenSource();
+        var result = updateService.Status.State == UpdateState.ReadyToInstall
+            ? updateService.Status
+            : await updateService.DownloadAndVerifyAsync(updateCancellation.Token);
+        if (result.State == UpdateState.ReadyToInstall)
+        {
+            try { updateService.InstallVerifiedUpdate(); }
+            catch { StatusMessage = "Unable to launch the verified installer. Your current installation is unchanged."; }
+        }
+    }
+
+    private void OpenReleaseNotes()
+    {
+        if (updateService.Status.Manifest is not { } manifest) return;
+        try { Process.Start(new ProcessStartInfo(manifest.ReleaseNotesUrl) { UseShellExecute = true }); }
+        catch { StatusMessage = "Unable to open release notes in your browser."; }
     }
 
     public void LoadCurrent()
@@ -106,6 +197,7 @@ public sealed class SettingsViewModel : ViewModelBase
         lowResourceMode = s.LowResourceMode;
         dataRetentionDays = s.DataRetentionDays;
         startWithWindows = StartupHelper.IsStartupEnabled();
+        autoUpdateCheckEnabled = s.AutoUpdateCheckEnabled;
 
         OnPropertyChanged(string.Empty);
     }
@@ -130,6 +222,7 @@ public sealed class SettingsViewModel : ViewModelBase
             s.LowResourceMode = lowResourceMode;
             s.DataRetentionDays = dataRetentionDays;
             s.StartWithWindows = startWithWindows;
+            s.AutoUpdateCheckEnabled = autoUpdateCheckEnabled;
 
             if (s.ActiveQuotaRule is not null)
             {

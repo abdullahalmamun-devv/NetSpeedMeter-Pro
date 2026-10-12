@@ -10,7 +10,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 Write-Host "================================================================" -ForegroundColor Cyan
-Write-Host "   SpeedMeter Pro V1.0 Release Candidate Orchestrator (Wave 5)  " -ForegroundColor Cyan
+Write-Host "   SpeedMeter Pro V1.0 RC.2 Release Candidate Orchestrator   " -ForegroundColor Cyan
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host "Timestamp: $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss UTC'))"
 Write-Host "Host OS:   $((Get-CimInstance Win32_OperatingSystem).Caption) ($((Get-CimInstance Win32_OperatingSystem).Version))"
@@ -80,7 +80,7 @@ if ($LASTEXITCODE -ne 0) { throw "SBOM generation failed." }
 # 6. Release Checksums (RELEASE-HASHES.sha256)
 Write-Host ""
 Write-Host "[6/6] Generating Authoritative Release Hashes..." -ForegroundColor Yellow
-$releaseDir = Join-Path $projectRoot 'artifacts\release'
+$releaseDir = Join-Path $projectRoot 'artifacts\release\1.0.0-rc.2'
 $hashFile = Join-Path $releaseDir 'RELEASE-HASHES.sha256'
 
 $filesToHash = Get-ChildItem -Path $releaseDir -File | Where-Object {
@@ -103,9 +103,9 @@ Write-Host "Wrote authoritative release hashes to: $hashFile" -ForegroundColor G
 # 7. Package Verification Drill & Live Installer Drill
 Write-Host ""
 Write-Host "=== Performing Release Candidate Verification Drill ===" -ForegroundColor Cyan
-$setupExe = Join-Path $releaseDir 'SpeedMeterPro-1.0.0-rc.1-Setup.exe'
+$setupExe = Join-Path $releaseDir 'SpeedMeterPro-1.0.0-rc.2-Setup.exe'
 if (-not (Test-Path -LiteralPath $setupExe)) {
-    throw "Verification drill failed: SpeedMeterPro-1.0.0-rc.1-Setup.exe missing."
+    throw "Verification drill failed: SpeedMeterPro-1.0.0-rc.2-Setup.exe missing."
 }
 
 # Verify Authenticode on Primary Setup.exe
@@ -176,7 +176,7 @@ try {
     } catch { }
 }
 
-# 8. Dynamic Gate E1 Decision Computing
+# 8. Package evidence summary. Gate decisions require independent review.
 if ($SkipTests -or $SkipSmoke -or $AllowDirty) {
     Write-Host ""
     Write-Host "================================================================" -ForegroundColor Yellow
@@ -188,8 +188,6 @@ if ($SkipTests -or $SkipSmoke -or $AllowDirty) {
 
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Green
-Write-Host ("  GATE E1 INDEPENDENTLY VERIFIED " + [char]0x2014 + " CONSUMER EXPERIENCE CLOSURE AUTHORIZED") -ForegroundColor Green
-Write-Host "  GATE E2: V1.0 PUBLIC RELEASE NOT VERIFIED -- GA BLOCKED" -ForegroundColor Yellow
-Write-Host "           (Awaiting physical multi-monitor, live Windows 11 matrix," -ForegroundColor Yellow
-Write-Host "            24-hour mixed workload, and 7-day soak evidence)" -ForegroundColor Yellow
+Write-Host "  RC.2 PACKAGE DRILL PASSED -- INDEPENDENT CONSUMER REVIEW REQUIRED" -ForegroundColor Green
+Write-Host "  GATE E2 FIELD VALIDATION NOT AUTHORIZED BY THIS SCRIPT" -ForegroundColor Yellow
 Write-Host "================================================================" -ForegroundColor Green

@@ -1,10 +1,20 @@
 # Implementation status
 
-**Current release:** 1.0.0-rc.1 (Release Candidate 1); GA release blocked pending physical hardware soak and Windows 11 matrix.  
-**Current milestone:** V1.0 Wave 5 complete; Gate E1 passed. Dynamic commit SHA model, standalone canonical Setup.exe with transactional staging and graceful shutdown handshake, dual trust Authenticode signing, update trust pipeline, live WAL SQLite pre-migration backup via `SqliteConnection.BackupDatabase`, bounded 3.0s shutdown, bounded logging, and SBOM generated. Gate E2 GA blocked awaiting physical soak and live Windows 11 matrix evidence.
+**Current release:** 1.0.0-rc.1 is the last packaged/evidenced candidate; 1.0.0-rc.2 source implementation is under verification. GA remains blocked.
+**Current milestone:** Gate E1 passed. RC.2 consumer experience closure is under independent review. Gate E2 field validation is not authorized until consumer closure evidence passes. The prior RC.1 established a canonical transactional Setup.exe, trust verification primitives, WAL online backup, bounded shutdown, local diagnostics, and SBOM.
 **Updated:** 12 October 2026 (Asia/Dhaka).
 
 ## Build / test status
+
+### RC.2 consumer integration observations (12 October 2026)
+
+- `scripts/build.ps1`: initial restore failed `NU1900` because the NuGet vulnerability feed was unreachable. With `NuGetAudit=false` for this offline local run, the full solution built with zero warnings/errors. This does not constitute a fresh package-vulnerability audit.
+- `scripts/check.ps1`: **268 pass, 1 intentional skip, 0 fail** with normal user access after installer fixtures were isolated from real account data and shell entries.
+- `scripts/check.ps1 -Windows`: **276 pass, 1 intentional skip, 0 fail** on Windows build 19045. This remains developer-host evidence only.
+- `scripts/smoke.ps1`: native WPF smoke completed with all expected state/navigation assertions True and live monitoring. Artifact: `artifacts/smoke-20261012-065004`.
+- Independent Security and Accessibility source reviews requested further packaged-flow and native accessibility evidence. RC.1→RC.2 update/restart, public Pages manifest, production signing, and Windows 11 field behavior remain unverified.
+
+### Prior RC.1 gate evidence
 
 - **Build:** Succeeded with 0 warnings, 0 errors across 7 projects (`Core`, `Windows`, `Storage`, `Application`, `App`, `Installer`, `Checks`) using .NET 10 SDK 10.0.401.
 - **Fixtures:** 250 passed, 1 intentional skip, 0 failed via `scripts/check.ps1`; 258 passed, 1 skip, 0 failed via `scripts/check.ps1 -Windows`. Total evaluated: 259. Groups include:

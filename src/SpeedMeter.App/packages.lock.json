@@ -50,8 +50,8 @@
       "speedmeter.application": {
         "type": "Project",
         "dependencies": {
-          "SpeedMeter.Core": "[1.0.0-rc.1, )",
-          "SpeedMeter.Storage": "[1.0.0-rc.1, )"
+          "SpeedMeter.Core": "[1.0.0-rc.2, )",
+          "SpeedMeter.Storage": "[1.0.0-rc.2, )"
         }
       },
       "speedmeter.core": {
@@ -62,21 +62,14 @@
         "dependencies": {
           "Microsoft.Data.Sqlite": "[9.0.2, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[2.1.12, )",
-          "SpeedMeter.Core": "[1.0.0-rc.1, )"
+          "SpeedMeter.Core": "[1.0.0-rc.2, )"
         }
       },
       "speedmeter.windows": {
         "type": "Project",
         "dependencies": {
-          "SpeedMeter.Core": "[1.0.0-rc.1, )"
+          "SpeedMeter.Core": "[1.0.0-rc.2, )"
         }
-      }
-    },
-    "net10.0-windows7.0/win-x64": {
-      "SQLitePCLRaw.lib.e_sqlite3": {
-        "type": "Transitive",
-        "resolved": "2.1.12",
-        "contentHash": "fWi8Dbknuhgg72fWinIdjXVaqO1hHL4YBBwVLnr7e1c9TAZwJ0QE38j9syW1hwx6HaqEVTwI+O07WPdZn8Rp0w=="
       }
     }
   }

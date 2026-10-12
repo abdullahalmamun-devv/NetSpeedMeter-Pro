@@ -104,8 +104,8 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
     private static void CanonicalVersionIdentityConformity()
     {
         Require(ProductIdentity.Name == "SpeedMeter Pro", "Product name mismatch.");
-        Require(ProductIdentity.ProductVersion == "1.0.0-rc.1", "Product version must be 1.0.0-rc.1.");
-        Require(ProductIdentity.FileVersion == "1.0.0.1", "File version must be 1.0.0.1.");
+        Require(ProductIdentity.ProductVersion == "1.0.0-rc.2", "Product version must be 1.0.0-rc.2.");
+        Require(ProductIdentity.FileVersion == "1.0.0.2", "File version must be 1.0.0.2.");
         Require(ProductIdentity.ReleaseChannel == "rc", "Release channel must be rc.");
         Require(ProductIdentity.DatabaseSchemaVersion == 3, "Database schema version must be 3.");
         Require(!string.IsNullOrWhiteSpace(ProductIdentity.CommitSha), "Commit SHA cannot be empty.");
@@ -737,7 +737,8 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
         var uninstallPreserve = new UninstallOptions(
             InstallDirectory: targetInstall,
             PurgeUserData: false,
-            Silent: true);
+            Silent: true,
+            UserDataDirectory: userDataDir);
 
         // Since we override default userDataDir in test, test logic directly
         Require(File.Exists(dbFile), "User data was lost before uninstall.");
@@ -747,7 +748,8 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
         var uninstallPurge = new UninstallOptions(
             InstallDirectory: targetInstall,
             PurgeUserData: true,
-            Silent: true);
+            Silent: true,
+            UserDataDirectory: userDataDir);
         InstallerEngine.UninstallAsync(uninstallPurge).GetAwaiter().GetResult();
 
         try { Directory.Delete(tempDir, true); } catch { }

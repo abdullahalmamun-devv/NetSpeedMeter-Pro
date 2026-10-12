@@ -1,16 +1,17 @@
 # SpeedMeter Pro User Guide & Documentation
 
-Welcome to **SpeedMeter Pro**, a precision network telemetry and speed monitoring application designed for Windows 10 and Windows 11.
+Welcome to **SpeedMeter Pro**, a local network telemetry and speed monitoring application. Windows 11 release support remains subject to the Gate E2 physical validation matrix.
 
 ---
 
 ## 1. Quick Start
 
 ### Installation
-1. Extract the release archive `SpeedMeterPro-1.0.0-rc.1-win-x64.zip`.
-2. Right-click `Install.ps1` and select **Run with PowerShell** (or run `powershell -ExecutionPolicy Bypass -File .\Install.ps1` from a terminal).
-3. The installer places the application into your local user programs directory (`%LocalAppData%\Programs\SpeedMeterPro`) and adds a Start Menu shortcut.
-4. Launch **SpeedMeter Pro** from your Start Menu.
+1. Download the canonical `SpeedMeterPro-1.0.0-rc.2-Setup.exe` release candidate.
+2. Double-click Setup.exe, choose your options and select **Install**. The installer uses your local user programs directory (`%LocalAppData%\Programs\SpeedMeterPro`) and does not require a separate .NET runtime installation.
+3. Choose **Launch SpeedMeter Pro** at completion, or open it later from Start.
+
+This RC is a field/lab candidate. Public production signing and the Windows 11 field matrix are still pending.
 
 ### First-Time Launch & Onboarding
 Upon initial launch, SpeedMeter Pro opens the Welcome window with default safe settings:
@@ -89,9 +90,5 @@ Configure automated notifications in **Settings > Alerts**:
 **Q: Why does the Wi-Fi Band show "Unavailable"?**  
 **A:** SpeedMeter Pro correlates radio band and channel strictly to the access point BSSID your adapter is currently associated with. If your adapter is in a transient state or the driver does not expose BSS list attributes, the app displays "Unavailable" rather than guessing.
 
-**Q: How do I completely remove SpeedMeter Pro and all data?**  
-**A:** Open PowerShell and run:
-```powershell
-powershell.exe -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\SpeedMeterPro\Uninstall.ps1" -PurgeUserData
-```
-This cleanly removes all application binaries, shortcuts, registry keys, and the historical SQLite database.
+**Q: How do I remove SpeedMeter Pro?**
+**A:** Open Windows **Settings → Apps → Installed apps → SpeedMeter Pro → Uninstall**. The uninstaller keeps your local history and settings by default. To erase them, explicitly select **Also delete my usage history, settings and local data** and confirm the permanent deletion.

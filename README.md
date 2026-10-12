@@ -2,15 +2,15 @@
 
 A high-performance, truthful Windows desktop network telemetry, accounting, and visualization application, engineered strictly from `Premium-Speed-Meter-PRD.md`.
 
-**Status: V1.0 Wave 5 complete; Gate E1 passed.** Gate E1 (Release Package Verification & RC Field Validation) is formally passed with version `1.0.0-rc.1`. Gate E2 (General Availability) remains blocked awaiting 7-day soak and physical Windows 11 matrix evidence.
+**Status: V1.0 consumer experience RC.2 in verification; Gate E1 passed.** The RC.1 release engineering gate remains closed. Gate E2 has not begun; consumer update, installer and crash recovery closure require independent evidence before field validation is authorized.
 
-The executable Windows fixture run passed 257 checks, with 1 intentional skip and 0 failures (249 passed in standard `check.ps1`). The native WPF smoke test passed all 18 assertions on Windows x64 with exit code 0.
+The prior RC.1 evidence records 250 passed standard checks, 258 passed Windows checks, one intentional skip in each suite, and 18/18 native WPF smoke assertions. RC.2 source integration currently passes 268 standard and 276 Windows executable checks (one intentional skip each), plus native WPF smoke on the Windows 10 developer host. Public update and packaged upgrade evidence remains pending.
 
 ---
 
 ## Quick Start
 
-Windows x64 and .NET SDK **10.0.401** are required. This repository includes a local SDK configuration under `.tools/dotnet`; scripts use it first, falling back to an installed system SDK. The application runs as a standard Windows user without requiring administrative privileges.
+The public consumer path is the self-contained `SpeedMeterPro-1.0.0-rc.2-Setup.exe`: double-click, install per user, and launch. No .NET runtime or terminal is required on the target PC. For source builds, Windows x64 and .NET SDK **10.0.401** are required. The repository includes a local SDK configuration under `.tools/dotnet`; scripts use it first, falling back to an installed system SDK.
 
 ```powershell
 .\scripts\build.ps1
@@ -20,6 +20,8 @@ Windows x64 and .NET SDK **10.0.401** are required. This repository includes a l
 .\scripts\release.ps1
 .\scripts\run.ps1
 ```
+
+RC.2 update publication uses a signed static GitHub Pages manifest and versioned GitHub Release Setup.exe asset. Automatic checks require the user's opt-in. See [update operations](docs/UPDATE-OPERATIONS.md) and [ADR-016](docs/decisions/ADR-016-github-static-update-distribution.md). Production manifest and Authenticode signing authorities remain external release dependencies.
 
 ---
 

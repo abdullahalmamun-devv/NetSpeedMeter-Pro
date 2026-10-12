@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '1.0.0-rc.1'
+    [string]$Version = '1.0.0-rc.2'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -8,7 +8,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 
 Write-Host "=== Generating Software Bill of Materials (SBOM) and Third-Party Notices ===" -ForegroundColor Cyan
 
-$releaseDir = Join-Path $projectRoot 'artifacts\release'
+$releaseDir = Join-Path $projectRoot "artifacts\release\$Version"
 if (-not (Test-Path -LiteralPath $releaseDir)) {
     New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
 }

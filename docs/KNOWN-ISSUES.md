@@ -1,9 +1,17 @@
 # SpeedMeter Pro Known Issues & Technical Limitations
 
-**Version:** 1.0.0-rc.1  
-**Status:** Release Candidate Evaluation  
+**Version:** 1.0.0-rc.2 (under verification)
+**Status:** Consumer experience closure review; Gate E2 not authorized
 
 This document provides a transparent, authoritative accounting of known limitations, design boundaries, and platform behaviors in SpeedMeter Pro V1.0.
+
+## RC.2 release dependencies
+
+- The public GitHub Pages RC manifest and versioned GitHub Release asset have not yet been published or verified live.
+- The embedded production update-manifest public key is provisional (2048-bit RSA). External production private-key provisioning and independently reviewed public-key replacement are pending. No production private key is stored in this repository.
+- A trusted public Authenticode certificate is pending. Any local test-signed RC.2 installer is a field/lab artifact, not GA.
+- Physical RC.1 → RC.2 upgrade/restart, full uninstall/reinstall/purge, and Windows 11 field validation require observed evidence before the corresponding claim.
+- Automatic update checks require user consent. User-initiated downloads are not yet automatically suppressed on metered networks; users should choose when to download.
 
 ---
 
@@ -25,7 +33,7 @@ This document provides a transparent, authoritative accounting of known limitati
 ### 2.1 Windows 11 vs Windows 10 Validation Scope
 - **Status:** Gate E2 GA Blocker.
 - **Description:** Automated test suites and developer verification have been executed on Windows 10 x64 Build 19045. Per project policy (`AGENTS.md`), evidence from Build 19045 does not authorize Windows 11 General Availability without dedicated live Windows 11 matrix testing.
-- **Impact:** While the application runs reliably across both OS families, full GA signoff is deferred until physical Windows 11 multi-monitor soak is completed in the field.
+- **Impact:** Developer observations on Windows 10 build 19045 do not establish Windows 11 support or authorize a Windows 10 product port. Full GA signoff is deferred until physical Windows 11 validation is completed.
 
 ### 2.2 Taskbar Docked Companion Geometry on Third-Party Shells
 - **Status:** Handled via Safe Fallback.

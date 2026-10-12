@@ -23,7 +23,8 @@ public sealed record InstallOptions(
     Stream? PayloadStream = null,
     bool Silent = false,
     bool LaunchAfterInstall = false,
-    bool CreateDesktopShortcut = false,
+    bool? CreateDesktopShortcut = null,
+    bool? StartWithWindows = null,
     Action<string>? Log = null
 );
 
@@ -31,7 +32,8 @@ public sealed record UninstallOptions(
     string? InstallDirectory = null,
     bool PurgeUserData = false,
     bool Silent = false,
-    Action<string>? Log = null
+    Action<string>? Log = null,
+    string? UserDataDirectory = null
 );
 
 public static class InstallerEngine
@@ -170,6 +172,7 @@ public static class InstallerEngine
         Directory.CreateDirectory(targetDir);
         var stagingDir = Path.Combine(targetDir, $".staging_{Guid.NewGuid():N}");
         var backupDir = Path.Combine(targetDir, $".backup_{Guid.NewGuid():N}");
+        var committedPaths = new List<string>();
         Directory.CreateDirectory(stagingDir);
 
         try
@@ -221,7 +224,9 @@ public static class InstallerEngine
             foreach (var file in Directory.GetFiles(stagingDir))
             {
                 var name = Path.GetFileName(file);
-                File.Move(file, Path.Combine(targetDir, name), overwrite: true);
+                var destination = Path.Combine(targetDir, name);
+                File.Move(file, destination, overwrite: true);
+                committedPaths.Add(destination);
             }
             foreach (var dir in Directory.GetDirectories(stagingDir))
             {
@@ -229,54 +234,66 @@ public static class InstallerEngine
                 var destSubDir = Path.Combine(targetDir, name);
                 if (Directory.Exists(destSubDir)) Directory.Delete(destSubDir, true);
                 Directory.Move(dir, destSubDir);
+                committedPaths.Add(destSubDir);
             }
 
-            // Copy self as Uninstall.exe into target
-            try
+            // Windows Settings depends on this executable and registry entry.
+            var currentExe = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(currentExe) || !File.Exists(currentExe))
+                throw new FileNotFoundException("Setup executable is unavailable for uninstall registration.");
+            var uninstallExePath = Path.Combine(targetDir, "Uninstall.exe");
+            if (!Path.GetFullPath(currentExe).Equals(Path.GetFullPath(uninstallExePath), StringComparison.OrdinalIgnoreCase))
             {
-                var currentExe = Environment.ProcessPath;
-                if (!string.IsNullOrWhiteSpace(currentExe) && File.Exists(currentExe))
-                {
-                    var uninstallExePath = Path.Combine(targetDir, "Uninstall.exe");
-                    File.Copy(currentExe, uninstallExePath, overwrite: true);
-                }
+                File.Copy(currentExe, uninstallExePath, overwrite: true);
+                committedPaths.Add(uninstallExePath);
             }
-            catch { }
 
-            // 6. Shell Integration (Start Menu shortcut and Registry Uninstall)
-            log("Registering Start Menu shortcut and Windows uninstall entries...");
-            var startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Start Menu\Programs");
-            var shortcutPath = Path.Combine(startMenuDir, "SpeedMeter Pro.lnk");
             var targetExe = Path.Combine(targetDir, "SpeedMeter.App.exe");
-            CreateShortcut(shortcutPath, targetExe, targetDir, "SpeedMeter Pro - Precision Network Performance Monitor");
-
-            if (options.CreateDesktopShortcut)
+            // Sandbox installs used by fixtures/release drills must not replace the
+            // real account's Start Menu, startup entry, or Windows Apps entry.
+            if (Path.GetFullPath(targetDir).Equals(Path.GetFullPath(GetDefaultInstallDirectory()), StringComparison.OrdinalIgnoreCase))
             {
+                log("Registering Start Menu shortcut and Windows uninstall entries...");
+                var startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Start Menu\Programs");
+                var shortcutPath = Path.Combine(startMenuDir, "SpeedMeter Pro.lnk");
+                CreateShortcut(shortcutPath, targetExe, targetDir, "SpeedMeter Pro - Precision Network Performance Monitor");
+
                 var desktopDir = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
                 var desktopShortcut = Path.Combine(desktopDir, "SpeedMeter Pro.lnk");
-                CreateShortcut(desktopShortcut, targetExe, targetDir, "SpeedMeter Pro");
-            }
+                if (options.CreateDesktopShortcut == true)
+                    CreateShortcut(desktopShortcut, targetExe, targetDir, "SpeedMeter Pro");
+                else if (options.CreateDesktopShortcut == false && File.Exists(desktopShortcut))
+                    File.Delete(desktopShortcut);
 
-            RegisterUninstallKey(targetDir, targetExe);
+                RegisterUninstallKey(targetDir, targetExe);
+
+                if (options.StartWithWindows is not null)
+                {
+                    using var runKey = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+                    if (options.StartWithWindows == true)
+                        runKey?.SetValue("SpeedMeterPro", $"\"{targetExe}\"", RegistryValueKind.String);
+                    else
+                        runKey?.DeleteValue("SpeedMeterPro", throwOnMissingValue: false);
+                }
+            }
 
             // Clean up staging & backup on success
             try { if (Directory.Exists(stagingDir)) Directory.Delete(stagingDir, true); } catch { }
             try { if (Directory.Exists(backupDir)) Directory.Delete(backupDir, true); } catch { }
-
-            log("Installation completed successfully!");
-
-            if (options.LaunchAfterInstall)
-            {
-                log("Launching SpeedMeter Pro...");
-                Process.Start(new ProcessStartInfo(targetExe) { UseShellExecute = true });
-            }
         }
         catch (Exception ex)
         {
             log($"Installation failed: {ex.Message}. Initiating transactional rollback...");
             // Rollback Phase
+            var rollbackSucceeded = false;
             try
             {
+                foreach (var path in committedPaths.AsEnumerable().Reverse())
+                {
+                    if (File.Exists(path)) File.Delete(path);
+                    else if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+                }
+
                 if (Directory.Exists(backupDir))
                 {
                     // Restore previous version
@@ -294,6 +311,7 @@ public static class InstallerEngine
                     }
                     log("Previous version restored successfully.");
                 }
+                rollbackSucceeded = true;
             }
             catch (Exception rollbackEx)
             {
@@ -302,10 +320,30 @@ public static class InstallerEngine
             finally
             {
                 try { if (Directory.Exists(stagingDir)) Directory.Delete(stagingDir, true); } catch { }
-                try { if (Directory.Exists(backupDir)) Directory.Delete(backupDir, true); } catch { }
+                if (rollbackSucceeded)
+                    try { if (Directory.Exists(backupDir)) Directory.Delete(backupDir, true); } catch { }
             }
 
             throw;
+        }
+
+        // File installation is committed. Launch is a separate best-effort step and must
+        // never enter the rollback catch after the previous version's backup is removed.
+        try { log("Installation completed successfully!"); } catch { }
+        if (options.LaunchAfterInstall)
+        {
+            try
+            {
+                var targetExe = Path.Combine(targetDir, "SpeedMeter.App.exe");
+                log("Launching SpeedMeter Pro...");
+                if (Process.Start(new ProcessStartInfo(targetExe) { UseShellExecute = true }) is null)
+                    throw new InvalidOperationException("Process launch returned no process.");
+            }
+            catch (Exception ex)
+            {
+                try { log($"Warning: Installation succeeded, but SpeedMeter Pro could not launch automatically: {ex.Message}"); }
+                catch { }
+            }
         }
     }
 
@@ -313,7 +351,7 @@ public static class InstallerEngine
     {
         var log = options.Log ?? (_ => { });
         var targetDir = options.InstallDirectory ?? GetDefaultInstallDirectory();
-        var userDataDir = GetDefaultUserDataDirectory();
+        var userDataDir = options.UserDataDirectory ?? GetDefaultUserDataDirectory();
         var userSid = GetCurrentUserSid();
 
         log("Beginning uninstallation of SpeedMeter Pro...");
@@ -329,50 +367,49 @@ public static class InstallerEngine
             }
         }
 
-        // 2. Remove Shortcuts
-        log("Removing application shortcuts...");
-        var startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Start Menu\Programs");
-        var startMenuShortcut = Path.Combine(startMenuDir, "SpeedMeter Pro.lnk");
-        try { if (File.Exists(startMenuShortcut)) File.Delete(startMenuShortcut); } catch { }
-
-        var desktopShortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "SpeedMeter Pro.lnk");
-        try { if (File.Exists(desktopShortcut)) File.Delete(desktopShortcut); } catch { }
-
-        // 3. Remove Registry Entries
-        log("Removing Windows Uninstall and Startup registry entries...");
-        try
+        // Delete selected data before unregistering the app so a failed purge remains retryable
+        // from Windows Settings. Retained data is never touched except for downloaded packages.
+        var updateStagingDir = Path.Combine(userDataDir, "staging");
+        if (Directory.Exists(updateStagingDir))
         {
-            using var uninstallKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall", writable: true);
-            uninstallKey?.DeleteSubKeyTree("SpeedMeterPro", throwOnMissingSubKey: false);
+            try { Directory.Delete(updateStagingDir, recursive: true); }
+            catch (Exception ex) { log($"Warning: Could not remove staged update packages: {ex.Message}"); }
         }
-        catch { }
 
-        try
-        {
-            using var runKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
-            runKey?.DeleteValue("SpeedMeterPro", throwOnMissingValue: false);
-        }
-        catch { }
-
-        // 4. User Data Directory Retention vs Purge
         if (options.PurgeUserData)
         {
             log($"Purging all user data and historical databases at {userDataDir}...");
-            try
-            {
-                if (Directory.Exists(userDataDir)) Directory.Delete(userDataDir, recursive: true);
-            }
-            catch (Exception ex)
-            {
-                log($"Warning: Could not completely delete user data directory: {ex.Message}");
-            }
+            if (Directory.Exists(userDataDir)) Directory.Delete(userDataDir, recursive: true);
         }
         else
         {
             log($"Preserving historical database and settings at: {userDataDir}");
         }
 
-        // 5. Remove Program Binaries
+        // 2. Remove shell integration only for the canonical per-user install.
+        if (Path.GetFullPath(targetDir).Equals(Path.GetFullPath(GetDefaultInstallDirectory()), StringComparison.OrdinalIgnoreCase))
+        {
+            log("Removing application shortcuts and Windows entries...");
+            var startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Start Menu\Programs");
+            var startMenuShortcut = Path.Combine(startMenuDir, "SpeedMeter Pro.lnk");
+            try { if (File.Exists(startMenuShortcut)) File.Delete(startMenuShortcut); } catch { }
+            var desktopShortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "SpeedMeter Pro.lnk");
+            try { if (File.Exists(desktopShortcut)) File.Delete(desktopShortcut); } catch { }
+            try
+            {
+                using var uninstallKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall", writable: true);
+                uninstallKey?.DeleteSubKeyTree("SpeedMeterPro", throwOnMissingSubKey: false);
+            }
+            catch { }
+            try
+            {
+                using var runKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+                runKey?.DeleteValue("SpeedMeterPro", throwOnMissingValue: false);
+            }
+            catch { }
+        }
+
+        // 4. Remove Program Binaries
         log("Removing application program files...");
         if (Directory.Exists(targetDir))
         {
@@ -387,50 +424,32 @@ public static class InstallerEngine
 
     private static void RegisterUninstallKey(string targetDir, string targetExe)
     {
-        try
-        {
-            using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SpeedMeterPro");
-            if (key is null) return;
+        using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SpeedMeterPro")
+            ?? throw new InvalidOperationException("Windows uninstall registration could not be created.");
 
-            key.SetValue("DisplayName", "SpeedMeter Pro", RegistryValueKind.String);
-            key.SetValue("DisplayVersion", ProductIdentity.ProductVersion, RegistryValueKind.String);
-            key.SetValue("Publisher", ProductIdentity.Company, RegistryValueKind.String);
-            key.SetValue("InstallLocation", targetDir, RegistryValueKind.String);
-            key.SetValue("DisplayIcon", $"{targetExe},0", RegistryValueKind.String);
-            key.SetValue("UninstallString", $"\"{Path.Combine(targetDir, "Uninstall.exe")}\" -Uninstall", RegistryValueKind.String);
-            key.SetValue("QuietUninstallString", $"\"{Path.Combine(targetDir, "Uninstall.exe")}\" -Uninstall -Silent", RegistryValueKind.String);
-            key.SetValue("NoModify", 1, RegistryValueKind.DWord);
-            key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
-        }
-        catch { }
+        key.SetValue("DisplayName", "SpeedMeter Pro", RegistryValueKind.String);
+        key.SetValue("DisplayVersion", ProductIdentity.ProductVersion, RegistryValueKind.String);
+        key.SetValue("Publisher", ProductIdentity.Company, RegistryValueKind.String);
+        key.SetValue("InstallLocation", targetDir, RegistryValueKind.String);
+        key.SetValue("DisplayIcon", $"{targetExe},0", RegistryValueKind.String);
+        key.SetValue("UninstallString", $"\"{Path.Combine(targetDir, "Uninstall.exe")}\" -Uninstall", RegistryValueKind.String);
+        key.SetValue("QuietUninstallString", $"\"{Path.Combine(targetDir, "Uninstall.exe")}\" -Uninstall -Silent", RegistryValueKind.String);
+        key.SetValue("NoModify", 1, RegistryValueKind.DWord);
+        key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
     }
 
     public static void CreateShortcut(string shortcutPath, string targetPath, string workingDirectory, string description)
     {
-        try
-        {
-            var link = (IShellLinkW)new ShellLink();
-            link.SetPath(targetPath);
-            link.SetWorkingDirectory(workingDirectory);
-            link.SetDescription(description);
-            link.SetIconLocation(targetPath, 0);
+        var dir = Path.GetDirectoryName(shortcutPath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        var link = (IShellLinkW)new ShellLink();
+        link.SetPath(targetPath);
+        link.SetWorkingDirectory(workingDirectory);
+        link.SetDescription(description);
+        link.SetIconLocation(targetPath, 0);
 
-            var file = (IPersistFile)link;
-            file.Save(shortcutPath, false);
-        }
-        catch
-        {
-            // Fallback via PowerShell / WScript if COM interface has issue in test context
-            try
-            {
-                var dir = Path.GetDirectoryName(shortcutPath);
-                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                var script = $"$s = (New-Object -ComObject WScript.Shell).CreateShortcut('{shortcutPath}'); $s.TargetPath = '{targetPath}'; $s.WorkingDirectory = '{workingDirectory}'; $s.Description = '{description}'; $s.Save()";
-                var psi = new ProcessStartInfo("powershell", $"-NoProfile -Command \"{script}\"") { CreateNoWindow = true, UseShellExecute = false };
-                Process.Start(psi)?.WaitForExit();
-            }
-            catch { }
-        }
+        var file = (IPersistFile)link;
+        file.Save(shortcutPath, false);
     }
 
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]

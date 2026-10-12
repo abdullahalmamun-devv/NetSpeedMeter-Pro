@@ -142,6 +142,9 @@ SpeedMeter.Checks.AlertFixtures.Run(Check);
 SpeedMeter.Checks.NetworkToolsFixtures.Run(Check);
 SpeedMeter.Checks.ConfigExportImportFixtures.RunAll();
 SpeedMeter.Checks.V1Wave5ReleaseFixtures.Run(Check);
+SpeedMeter.Checks.ConsumerInstallerFixtures.Run(Check);
+SpeedMeter.Checks.ConsumerCrashFixtures.Run(Check);
+SpeedMeter.Checks.ConsumerUpdateFixtures.Run(Check);
 
 if (args.Contains("--windows"))
 {

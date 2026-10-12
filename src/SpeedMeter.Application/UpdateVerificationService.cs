@@ -85,7 +85,7 @@ k2XOJ6PB3p1aFKOMraNr7Z/jOnJPd0l82V72KpG44SL7UocsBgNxWL3oTJY+kmVv
 
     public static RSA GetPinnedPublicKey(SigningTrustMode mode = SigningTrustMode.Production)
     {
-        if (pinnedPublicKeyOverride != null)
+        if (mode == SigningTrustMode.DevelopmentTest && pinnedPublicKeyOverride != null)
             return pinnedPublicKeyOverride;
 
         lock (KeyLock)
@@ -129,18 +129,27 @@ public static class UpdateVerificationService
         var manifest = JsonSerializer.Deserialize<UpdateManifest>(json, JsonOptions)
             ?? throw new JsonException("Failed to deserialize update manifest.");
 
-        if (manifest.SchemaVersion <= 0)
+        if (manifest.SchemaVersion != 1)
             throw new InvalidOperationException("Invalid manifest schema version.");
         if (string.IsNullOrWhiteSpace(manifest.Product) || manifest.Product != ProductIdentity.Name.Replace(" ", ""))
             throw new InvalidOperationException("Manifest product identity mismatch.");
         if (string.IsNullOrWhiteSpace(manifest.Version))
             throw new InvalidOperationException("Manifest version cannot be empty.");
+        if (manifest.Channel is not ("rc" or "stable") || string.IsNullOrWhiteSpace(manifest.MinSupportedVersion))
+            throw new InvalidOperationException("Invalid update channel or minimum version.");
+        if (manifest.Publisher is not ("SpeedMeter Pro" or "SpeedMeter Pro Project"))
+            throw new InvalidOperationException("Update publisher mismatch.");
         if (string.IsNullOrWhiteSpace(manifest.PackageSha256) || manifest.PackageSha256.Length != 64)
             throw new InvalidOperationException("Manifest package SHA-256 hash is missing or invalid.");
+        foreach (var digit in manifest.PackageSha256)
+            if (!Uri.IsHexDigit(digit))
+                throw new InvalidOperationException("Manifest package SHA-256 hash is not hexadecimal.");
         if (manifest.PackageSizeBytes <= 0)
             throw new InvalidOperationException("Manifest package size must be positive.");
         if (string.IsNullOrWhiteSpace(manifest.PackageUrl) || !Uri.TryCreate(manifest.PackageUrl, UriKind.Absolute, out var uri) || uri.Scheme != "https")
             throw new InvalidOperationException("Manifest package URL must be an absolute HTTPS URL.");
+        if (string.IsNullOrWhiteSpace(manifest.ReleaseNotesUrl) || !Uri.TryCreate(manifest.ReleaseNotesUrl, UriKind.Absolute, out var notesUri) || notesUri.Scheme != "https")
+            throw new InvalidOperationException("Manifest release notes URL must be an absolute HTTPS URL.");
 
         return manifest;
     }
@@ -149,7 +158,7 @@ public static class UpdateVerificationService
     {
         ArgumentNullException.ThrowIfNull(manifest);
         // Canonical deterministic representation: exact pipe-delimited payload excluding signature
-        var canonical = $"{manifest.SchemaVersion}|{manifest.Product}|{manifest.Channel}|{manifest.Version}|{manifest.BuildDateUtc.ToUnixTimeSeconds()}|{manifest.MinSupportedVersion}|{manifest.PackageUrl}|{manifest.PackageSha256}|{manifest.PackageSizeBytes}|{manifest.TargetDbSchemaVersion}|{manifest.Publisher}";
+        var canonical = $"{manifest.SchemaVersion}|{manifest.Product}|{manifest.Channel}|{manifest.Version}|{manifest.BuildDateUtc.ToUnixTimeSeconds()}|{manifest.MinSupportedVersion}|{manifest.PackageUrl}|{manifest.PackageSha256}|{manifest.PackageSizeBytes}|{manifest.TargetDbSchemaVersion}|{manifest.ReleaseNotesUrl}|{manifest.Publisher}";
         return Encoding.UTF8.GetBytes(canonical);
     }
 
@@ -385,7 +394,7 @@ public static class UpdateVerificationService
             }
         }
 
-        VerifyStagedPayloadAuthenticode(packageFilePath, mode, manifest.Publisher);
+        VerifyStagedPayloadAuthenticode(packageFilePath, mode, UpdateTrustAnchor.ExpectedPublisher);
 
         if (currentDatabaseVersion.HasValue && applicationSupportedVersion.HasValue)
         {

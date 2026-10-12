@@ -1,8 +1,8 @@
 # Current milestone
 
-**V1.0 Wave 5 complete; Gate E1 passed; Gate E2 GA pending field validation.** All Wave 5 Release Engineering requirements implemented:
-- Pinned standalone canonical installer `SpeedMeterPro-1.0.0-rc.1-Setup.exe` (~49.62 MB) with transactional staging (`.staging_<guid>`), upgrade backup (`.backup_<guid>`), and graceful shutdown handshake (`Local\SpeedMeterPro.Shutdown.<UserSid>` and `WM_CLOSE`, zero `Stop-Process -Force`) authored per ADR-012.
-- Secondary self-contained `win-x64` archive (`SpeedMeterPro-1.0.0-rc.1-win-x64.zip`, ~35.33 MB compressed, 106.84 MB uncompressed) and secondary framework-dependent distribution (`SpeedMeterPro-1.0.0-rc.1-win-x64-fdd.zip`, 0.44 MB compressed) authored per ADR-012 and ADR-013.
+**V1.0 Gate E1 passed; RC.2 consumer experience closure in progress; Gate E2 not yet authorized.** Wave 5 Release Engineering requirements were implemented in RC.1:
+- Pinned standalone canonical installer `SpeedMeterPro-1.0.0-rc.1-Setup.exe` (149,004,864 bytes per RC.1 evidence) with transactional staging (`.staging_<guid>`), upgrade backup (`.backup_<guid>`), and graceful shutdown handshake (`Local\SpeedMeterPro.Shutdown.<UserSid>` and `WM_CLOSE`, zero `Stop-Process -Force`) authored per ADR-012.
+- Secondary self-contained `win-x64` archive (`SpeedMeterPro-1.0.0-rc.1-win-x64.zip`, 75,300,502 bytes compressed) and secondary framework-dependent distribution (`SpeedMeterPro-1.0.0-rc.1-win-x64-fdd.zip`, 1,686,245 bytes compressed) authored per ADR-012 and ADR-013.
 - Zero-UAC standard user installation into `%LocalAppData%\Programs\SpeedMeterPro`, Start Menu integration, and clean uninstaller with user data retention vs complete purge (`-PurgeUserData`).
 - Multi-stage update trust pipeline (ADR-014) with pinned RSA trust anchor, deterministic pipe-delimited canonical manifest payload serialization, package SHA-256 verification, Authenticode binary signature and publisher enforcement with dual trust modes (`Production` vs `DevelopmentTest`), quarantine staging, and downgrade rejection.
 - Durability and disaster recovery: Pre-migration SQLite snapshot creation on live WAL writer using native `SqliteConnection.BackupDatabase` and rollback recovery drill with 100% data fidelity.
@@ -15,19 +15,24 @@
 
 # In progress
 
-None. Wave 5 completed; Gate E1 closed.
+| Task | Owner | Reviewer | Dependency | Acceptance |
+|---|---|---|---|---|
+| V1-CONS-UPDATE-001 | Update/Application + UI | Security, Accessibility, QA, Director | Gate E1, ADR-014 | Opt-in daily GitHub signed-manifest checks, manual check, secure one-click update and restart |
+| V1-CONS-INSTALL-001 | Windows Release/Installer | Accessibility, QA, Director | Gate E1, ADR-012/015 | Graphical per-user install/uninstall with default data retention and explicit purge |
+| V1-CONS-CRASH-001 | Reliability/Crash UX | Security, Accessibility, QA, Director | Gate E1, ADR-015 | Bounded redacted local crash reports and next-launch recovery without upload |
+| V1-CONS-RELEASE-001 | Director/Release | Independent QA, Security, Accessibility | Three consumer systems | RC.2 clean source, regression, consumer integration, artifact and evidence |
 
-# Ready (Next Wave: Field Validation & V1.5 Engineering)
+# Queued behind RC.2 consumer closure
 
 | Task | Owner | Reviewer | Dependency | Acceptance |
 |---|---|---|---|---|
-| V1-GA-001 | Field / Reliability Engineer | QA + Director | Gate E1 passed | 7-day soak stability verification and 24-hour mixed network workload run on physical hardware |
-| V1-GA-002 | Platform / QA Engineer | QA + Director | Gate E1 passed | Windows 11 target validation matrix (26H2, 25H2, 26H1, 24H2) live hardware power transition verification |
-| V1.5-PLAN-001 | Project Director | Software Architect + Product | Release candidate | Author V1.5 Master Execution Plan covering least-privilege ETW network attribution research and advanced quality tooling |
+| V1-GA-001 | Field / Reliability Engineer | QA + Director | RC.2 consumer closure passed | 7-day soak stability verification and 24-hour mixed network workload run on physical hardware |
+| V1-GA-002 | Platform / QA Engineer | QA + Director | RC.2 consumer closure passed | Windows 11 target validation matrix (26H2, 25H2, 26H1, 24H2) live hardware power transition verification |
+| V1.5-PLAN-001 | Project Director | Software Architect + Product | V1.0 gate progression | Author V1.5 plan only after V1.0 gate progression permits it |
 
 # Review
 
-None. Architect, Security, and QA review completed; Director approved Gate E1.
+RC.2 Security/Privacy and Accessibility source reviews are recorded in `docs/reviews/` as CHANGES REQUESTED pending packaged update, native keyboard/Narrator/DPI, and external signing/hosting evidence. Gate E1 remains the last passed gate; the Director has not accepted RC.2 consumer closure or authorized Gate E2.
 
 # Done
 
