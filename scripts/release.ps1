@@ -132,7 +132,9 @@ try {
     $psiInstall.UseShellExecute = $false
     $psiInstall.CreateNoWindow = $true
     $pInstall = [System.Diagnostics.Process]::Start($psiInstall)
-    $pInstall.WaitForExit(30000)
+    if (-not $pInstall.WaitForExit(30000)) {
+        throw "Installer drill timed out after 30 seconds."
+    }
     if ($pInstall.ExitCode -ne 0) {
         throw "Installer drill failed with exit code $($pInstall.ExitCode)."
     }
@@ -158,14 +160,20 @@ try {
     # Run silent uninstall drill
     Write-Host "Running silent uninstallation drill from sandbox..." -ForegroundColor Yellow
     $uninstallExe = Join-Path $drillDir 'Uninstall.exe'
-    if (Test-Path -LiteralPath $uninstallExe) {
-        $psiUninstall = New-Object System.Diagnostics.ProcessStartInfo
-        $psiUninstall.FileName = $uninstallExe
-        $psiUninstall.Arguments = "-Uninstall -Silent -Dir `"$drillDir`""
-        $psiUninstall.UseShellExecute = $false
-        $psiUninstall.CreateNoWindow = $true
-        $pUninstall = [System.Diagnostics.Process]::Start($psiUninstall)
-        $pUninstall.WaitForExit(30000)
+    if (-not (Test-Path -LiteralPath $uninstallExe)) {
+        throw "Uninstaller drill failed: Uninstall.exe missing after setup."
+    }
+    $psiUninstall = New-Object System.Diagnostics.ProcessStartInfo
+    $psiUninstall.FileName = $uninstallExe
+    $psiUninstall.Arguments = "-Uninstall -Silent -Dir `"$drillDir`""
+    $psiUninstall.UseShellExecute = $false
+    $psiUninstall.CreateNoWindow = $true
+    $pUninstall = [System.Diagnostics.Process]::Start($psiUninstall)
+    if (-not $pUninstall.WaitForExit(30000)) {
+        throw "Uninstaller drill timed out after 30 seconds."
+    }
+    if ($pUninstall.ExitCode -ne 0) {
+        throw "Uninstaller drill failed with exit code $($pUninstall.ExitCode)."
     }
     Write-Host "Installation and uninstallation drills verified successfully." -ForegroundColor Green
 } finally {
