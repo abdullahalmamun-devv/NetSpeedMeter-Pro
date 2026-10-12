@@ -1,6 +1,6 @@
 # Current milestone
 
-**V1.0 Gate E1 passed; RC.2 consumer experience closure in progress; Gate E2 not yet authorized.** Wave 5 Release Engineering requirements were implemented in RC.1:
+**V1.0 Gate E1 passed; RC.2/RC.3 consumer experience and safety closure NOT VERIFIED; Gate E2 blocked.** Final RC.3 source and isolated one-click updater drill evidence are recorded in `docs/evidence/CONSUMER-CLOSURE-RC3.md`. Wave 5 Release Engineering requirements were implemented in RC.1:
 - Pinned standalone canonical installer `SpeedMeterPro-1.0.0-rc.1-Setup.exe` (149,004,864 bytes per RC.1 evidence) with transactional staging (`.staging_<guid>`), upgrade backup (`.backup_<guid>`), and graceful shutdown handshake (`Local\SpeedMeterPro.Shutdown.<UserSid>` and `WM_CLOSE`, zero `Stop-Process -Force`) authored per ADR-012.
 - Secondary self-contained `win-x64` archive (`SpeedMeterPro-1.0.0-rc.1-win-x64.zip`, 75,300,502 bytes compressed) and secondary framework-dependent distribution (`SpeedMeterPro-1.0.0-rc.1-win-x64-fdd.zip`, 1,686,245 bytes compressed) authored per ADR-012 and ADR-013.
 - Zero-UAC standard user installation into `%LocalAppData%\Programs\SpeedMeterPro`, Start Menu integration, and clean uninstaller with user data retention vs complete purge (`-PurgeUserData`).
@@ -36,7 +36,7 @@
 
 # Review
 
-RC.2 Security/Privacy and Accessibility re-reviews are recorded in `docs/reviews/` as CHANGES REQUESTED. The prior clean-tree, test-signed RC.2 package passed its silent sandbox install/uninstall drill (`docs/evidence/RELEASE-EVIDENCE-v1.0.0-rc.2.md`). The required live update is from an updater-capable RC.2 lab seed to newer RC.3; RC.1 cannot perform an updater action added in RC.2. Native accessibility, packet/process-level privacy, public provenance, and production signing/hosting remain open. Gate E1 remains the last passed gate; the Director has not accepted consumer closure or authorized Gate E2.
+RC.2 Security/Privacy and Accessibility re-reviews are recorded in `docs/reviews/` as CHANGES REQUESTED / NOT VERIFIED. The prior clean-tree, test-signed RC.2 package passed its silent sandbox install/uninstall drill (`docs/evidence/RELEASE-EVIDENCE-v1.0.0-rc.2.md`). An updater-capable RC.2 lab seed completed an isolated signed-manifest, downloaded-Setup, shutdown, install, relaunch and data-preservation drill to final-source RC.3 (`docs/evidence/CONSUMER-CLOSURE-RC3.md`). Native accessibility, installed-apps registration, native purge/reinstall, packaged crash and privacy observations, deletion-race security review, production signing and public manifest/release hosting remain open. Public source provenance was pushed normally. Gate E1 remains the last passed gate; the Director has not accepted consumer closure or authorized Gate E2.
 
 # Done
 
