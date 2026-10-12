@@ -127,17 +127,18 @@ foreach ($filePath in $filesToSign) {
     Write-Host "Signing $fileName..." -NoNewline
     $sigResult = $null
 
-    try {
-        # Attempt signing with timestamp server
-        $sigResult = Set-AuthenticodeSignature -FilePath $filePath -Certificate $cert -HashAlgorithm SHA256 -TimestampServer $timestampServer -ErrorAction Stop
-    } catch {
-        if ($Mode -eq 'Production') {
+    if ($Mode -eq 'Production') {
+        try {
+            # Production packages require a trusted timestamp.
+            $sigResult = Set-AuthenticodeSignature -FilePath $filePath -Certificate $cert -HashAlgorithm SHA256 -TimestampServer $timestampServer -ErrorAction Stop
+        } catch {
             Write-Host " [FAILED: RFC 3161 timestamping failed in Production mode]" -ForegroundColor Red
             throw "Production signing failed: RFC 3161 timestamp server '$timestampServer' unreachable: $_"
-        } else {
-            Write-Host " (timestamp offline, signing locally)" -NoNewline -ForegroundColor Yellow
-            $sigResult = Set-AuthenticodeSignature -FilePath $filePath -Certificate $cert -HashAlgorithm SHA256
         }
+    } else {
+        # A field/lab signature has no public timestamp requirement. Avoid an
+        # unnecessary external request and unbounded offline network wait.
+        $sigResult = Set-AuthenticodeSignature -FilePath $filePath -Certificate $cert -HashAlgorithm SHA256
     }
 
     $verify = Get-AuthenticodeSignature -FilePath $filePath
