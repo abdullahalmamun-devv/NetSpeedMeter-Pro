@@ -171,6 +171,10 @@ public sealed class InstallerWindow : Window
         _secondary.IsEnabled = false;
         _progress.Visibility = Visibility.Visible;
         _status.Text = _uninstall ? "Uninstalling SpeedMeter Pro…" : "Installing SpeedMeter Pro…";
+        // Read WPF controls on the dispatcher thread before starting filesystem work.
+        var purgeUserData = _purge.IsChecked == true;
+        var createDesktopShortcut = _desktop.IsChecked == true;
+        var startWithWindows = _startup.IsChecked == true;
         try
         {
             void Log(string message)
@@ -188,7 +192,7 @@ public sealed class InstallerWindow : Window
             {
                 await Task.Run(() => InstallerEngine.UninstallAsync(new UninstallOptions(
                     InstallDirectory: _targetDir,
-                    PurgeUserData: _purge.IsChecked == true,
+                    PurgeUserData: purgeUserData,
                     Log: Log)));
             }
             else
@@ -197,8 +201,8 @@ public sealed class InstallerWindow : Window
                     TargetDirectory: _targetDir,
                     PayloadZipPath: _payloadPath,
                     PayloadStream: _payloadStream,
-                    CreateDesktopShortcut: _desktop.IsChecked == true,
-                    StartWithWindows: _startup.IsChecked == true,
+                    CreateDesktopShortcut: createDesktopShortcut,
+                    StartWithWindows: startWithWindows,
                     Log: Log)));
             }
 
