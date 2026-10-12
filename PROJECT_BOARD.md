@@ -32,7 +32,7 @@
 
 # Review
 
-RC.2 Security/Privacy and Accessibility source reviews are recorded in `docs/reviews/` as CHANGES REQUESTED pending packaged update, native keyboard/Narrator/DPI, and external signing/hosting evidence. Gate E1 remains the last passed gate; the Director has not accepted RC.2 consumer closure or authorized Gate E2.
+RC.2 Security/Privacy and Accessibility re-reviews are recorded in `docs/reviews/` as CHANGES REQUESTED. The source findings were addressed and the clean-tree, test-signed RC.2 package passed its silent sandbox install/uninstall drill (`docs/evidence/RELEASE-EVIDENCE-v1.0.0-rc.2.md`). Actual RC.1→RC.2 updater/restart and data-preservation evidence, interactive keyboard/Narrator/DPI/High Contrast observations, packet-level privacy, and production signing/hosting remain open. Gate E1 remains the last passed gate; the Director has not accepted RC.2 consumer closure or authorized Gate E2.
 
 # Done
 

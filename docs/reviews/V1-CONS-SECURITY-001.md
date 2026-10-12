@@ -9,13 +9,13 @@
 
 - `PROJECT_BOARD.md`, `IMPLEMENTATION_STATUS.md`, the three task and handoff files, ADR-014/015, PRD §§24–25, and the consumer closure request.
 - `UpdateService`, `UpdateVerificationService`, `CrashReportService`, application crash wiring/recovery window, installer engine/program/window, and the three dedicated fixture files.
-- `artifacts/rc2-release-final.log` and `docs/evidence/RELEASE-EVIDENCE-v1.0.0-rc.2.md`. The final orchestrator ran from clean Git HEAD `70c873052eeb320134318963a8107aa19c37c69c` on Windows 10 build 19045. No live production manifest or final production key is evidenced; the update operations document labels this `EXTERNAL-DEPENDENCY-PENDING`.
+- `artifacts/rc2-release-authoritative.log` and `docs/evidence/RELEASE-EVIDENCE-v1.0.0-rc.2.md`. The authoritative rerun started from clean Git HEAD `b0e425f34ac3033ee36bf2da27ee9d339a9b3bed` on Windows 10 build 19045. I also inspected the earlier `artifacts/rc2-release-final.log`; its source SHA and package hash are superseded and do not identify the current artifact. No live production manifest or final production key is evidenced; the update operations document labels this `EXTERNAL-DEPENDENCY-PENDING`.
 
 ## Observed RC.2 lab result
 
 - The release build completed across seven projects with **0 warnings and 0 errors**. The executable Windows fixture runner reported **276 passed, 1 intentional skip, 0 failed**, including all 11 consumer update, 3 installer, and 4 crash fixtures. The skip was the fixture for an unavailable platform timezone; it was not an update, installer, or crash failure.
 - Native WPF smoke completed with its named collector, navigation, widget, tray, and storage assertions True. That smoke did not exercise the new interactive installer or crash recovery window.
-- The orchestrator produced a **test-signed** standalone `SpeedMeterPro-1.0.0-rc.2-Setup.exe` (217,575,696 bytes; SHA-256 `1d456738d07a455830967a6f7d41c96f1138550023ccefed6300b208fe43c420`). It completed a silent sandbox install and uninstall with exit code 0, checked installed application files, and verified embedded version/source identity `1.0.0-rc.2+70c873052eeb320134318963a8107aa19c37c69c`.
+- The authoritative orchestrator produced a **test-signed** standalone `SpeedMeterPro-1.0.0-rc.2-Setup.exe` (217,575,696 bytes; SHA-256 `5ac09394b27c2d6c9f7be2cf8b5b3961e059652d6874d0dc85c2d1a459c1eedf`). It completed a silent sandbox install and uninstall with exit code 0, checked installed application files, and verified embedded version/source identity `1.0.0-rc.2+b0e425f34ac3033ee36bf2da27ee9d339a9b3bed`.
 - The self-signed test certificate yielded Authenticode `UnknownError` under the untrusted test root, as expected for this lab mode. This package cannot establish Production trust or public-distribution readiness.
 - The release evidence records `NuGetAudit=false` because the vulnerability feed was unavailable. The clean build does not establish a fresh dependency vulnerability audit.
 

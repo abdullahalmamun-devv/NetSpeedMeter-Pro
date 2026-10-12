@@ -4,13 +4,13 @@ A high-performance, truthful Windows desktop network telemetry, accounting, and 
 
 **Status: V1.0 consumer experience RC.2 in verification; Gate E1 passed.** The RC.1 release engineering gate remains closed. Gate E2 has not begun; consumer update, installer and crash recovery closure require independent evidence before field validation is authorized.
 
-The prior RC.1 evidence records 250 passed standard checks, 258 passed Windows checks, one intentional skip in each suite, and 18/18 native WPF smoke assertions. RC.2 source integration currently passes 268 standard and 276 Windows executable checks (one intentional skip each), plus native WPF smoke on the Windows 10 developer host. Public update and packaged upgrade evidence remains pending.
+The prior RC.1 evidence records 250 passed standard checks, 258 passed Windows checks, one intentional skip in each suite, and 18/18 native WPF smoke assertions. RC.2 passes 268 standard and 276 Windows executable checks (one intentional skip each), native WPF smoke, and a test-signed installer sandbox drill on the Windows 10 developer host. The RC.2 package is a field/lab candidate; public update and packaged upgrade evidence remains pending. See [RC.2 release evidence](docs/evidence/RELEASE-EVIDENCE-v1.0.0-rc.2.md).
 
 ---
 
 ## Quick Start
 
-The public consumer path is the self-contained `SpeedMeterPro-1.0.0-rc.2-Setup.exe`: double-click, install per user, and launch. No .NET runtime or terminal is required on the target PC. For source builds, Windows x64 and .NET SDK **10.0.401** are required. The repository includes a local SDK configuration under `.tools/dotnet`; scripts use it first, falling back to an installed system SDK.
+The intended consumer path is a self-contained `SpeedMeterPro-1.0.0-rc.2-Setup.exe`: double-click, install per user, and launch. It needs no .NET runtime or terminal on the target PC. The current locally produced Setup.exe is test-signed and is **not for public distribution**. For source builds, Windows x64 and .NET SDK **10.0.401** are required. The repository includes a local SDK configuration under `.tools/dotnet`; scripts use it first, falling back to an installed system SDK.
 
 ```powershell
 .\scripts\build.ps1

@@ -9,7 +9,7 @@
 
 - `PROJECT_BOARD.md`, `IMPLEMENTATION_STATUS.md`, `docs/engineering-office.md`, the three consumer task and handoff files, PRD §§6 and 24–25, and the consumer closure request.
 - Current `InstallerWindow.cs`, `SettingsView.xaml`, `SettingsViewModel.cs`, `FirstRunWindow.xaml` and code-behind, `CrashRecoveryWindow.cs`, and application startup/recovery wiring.
-- `artifacts/rc2-release-final.log`: clean source `70c873052eeb320134318963a8107aa19c37c69c`; Release build 0 warnings/errors; executable Windows fixtures 276 passed, 1 intentional skip, 0 failed; WPF smoke assertions shown true; test-signed RC.2 Setup.exe silent install and uninstall both succeeded, with installed commit identity verified. This verifies build and automated flows on Windows 10 build 19045. The silent installer drill and general WPF smoke do not exercise the graphical accessibility flows below.
+- `artifacts/rc2-release-authoritative.log`: clean source `b0e425f34ac3033ee36bf2da27ee9d339a9b3bed`; Release build 0 warnings/errors; executable Windows fixtures 276 passed, 1 intentional skip, 0 failed; named native WPF smoke assertions all shown true; test-signed RC.2 Setup.exe silent install and uninstall both succeeded with exit code 0, and installed commit identity `b0e425f34ac3033ee36bf2da27ee9d339a9b3bed` was verified. This verifies build and automated flows on Windows 10 build 19045. The silent installer drill and general WPF smoke do not exercise the graphical accessibility flows below.
 
 ## Original findings — source disposition
 

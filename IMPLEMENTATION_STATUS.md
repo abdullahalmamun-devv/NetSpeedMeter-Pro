@@ -1,18 +1,20 @@
 # Implementation status
 
-**Current release:** 1.0.0-rc.1 is the last packaged/evidenced candidate; 1.0.0-rc.2 source implementation is under verification. GA remains blocked.
-**Current milestone:** Gate E1 passed. RC.2 consumer experience closure is under independent review. Gate E2 field validation is not authorized until consumer closure evidence passes. The prior RC.1 established a canonical transactional Setup.exe, trust verification primitives, WAL online backup, bounded shutdown, local diagnostics, and SBOM.
+**Current release:** 1.0.0-rc.2 is the latest packaged, test-signed field/lab candidate, built from clean `RC2ReleaseSourceSha` `b0e425f34ac3033ee36bf2da27ee9d339a9b3bed`. It is not a public production release. RC.1 evidence remains preserved. GA remains blocked.
+**Current milestone:** Gate E1 passed. RC.2 consumer experience closure is **not verified** after independent review; Gate E2 field validation is not authorized. The RC.2 package drill passed, while the real RC.1→RC.2 updater/restart/data-preservation flow, public hosting, production signing, interactive accessibility, and packet-level privacy evidence remain open. See `docs/evidence/RELEASE-EVIDENCE-v1.0.0-rc.2.md`.
 **Updated:** 12 October 2026 (Asia/Dhaka).
 
 ## Build / test status
 
 ### RC.2 consumer integration observations (12 October 2026)
 
+- Clean-tree `scripts/release.ps1 -SignMode Test` completed without bypass flags from `b0e425f34ac3033ee36bf2da27ee9d339a9b3bed`. The canonical test-signed Setup.exe is 217,575,696 bytes, SHA-256 `5ac09394b27c2d6c9f7be2cf8b5b3961e059652d6874d0dc85c2d1a459c1eedf`. Its silent custom-directory install and uninstall returned exit code 0; installed ProductVersion embedded the source SHA. The signing root is untrusted and the artifact is not for public distribution.
 - `scripts/build.ps1`: initial restore failed `NU1900` because the NuGet vulnerability feed was unreachable. With `NuGetAudit=false` for this offline local run, the full solution built with zero warnings/errors. This does not constitute a fresh package-vulnerability audit.
 - `scripts/check.ps1`: **268 pass, 1 intentional skip, 0 fail** with normal user access after installer fixtures were isolated from real account data and shell entries.
 - `scripts/check.ps1 -Windows`: **276 pass, 1 intentional skip, 0 fail** on Windows build 19045. This remains developer-host evidence only.
 - `scripts/smoke.ps1`: native WPF smoke completed with all expected state/navigation assertions True and live monitoring. Artifact: `artifacts/smoke-20261012-065004`.
 - Independent Security and Accessibility source reviews requested further packaged-flow and native accessibility evidence. RC.1→RC.2 update/restart, public Pages manifest, production signing, and Windows 11 field behavior remain unverified.
+- Independent reviews were refreshed after the package drill: source findings are addressed, while both decisions remain CHANGES REQUESTED because consumer end-to-end and native accessibility evidence are incomplete. Gate E2 work was not started.
 
 ### Prior RC.1 gate evidence
 
