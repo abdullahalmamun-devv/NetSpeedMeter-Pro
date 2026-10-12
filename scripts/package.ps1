@@ -1,6 +1,6 @@
 param(
     [string]$Configuration = 'Release',
-    [string]$Version = '1.0.0-rc.2',
+    [string]$Version = '1.0.0-rc.3',
     [string]$Runtime = 'win-x64',
     [ValidateSet('Production', 'Test')][string]$SignMode = 'Test'
 )
@@ -20,8 +20,29 @@ $releaseRoot = [System.IO.Path]::GetFullPath((Join-Path $releaseParent $Version)
 if (-not $releaseRoot.StartsWith($releaseParent + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Release output escaped the product release directory.'
 }
+function Remove-GuardedReleaseDirectory([string]$Path) {
+    if (-not [System.IO.Path]::IsPathFullyQualified($Path)) { throw 'Release cleanup path must be absolute.' }
+    if (($Path -split '[\\/]') -contains '..' -or ($Path -split '[\\/]') -contains '.') { throw 'Release cleanup path contains dot segments.' }
+    $full = [System.IO.Path]::GetFullPath($Path).TrimEnd([char[]]@('\','/'))
+    if (-not $full.StartsWith($releaseParent + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Release cleanup escaped the product release directory.'
+    }
+    $current = $full
+    while ($current) {
+        if ((Test-Path -LiteralPath $current) -and ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Release cleanup traverses a reparse point.' }
+        $next = [System.IO.Path]::GetDirectoryName($current)
+        if (-not $next -or $next -eq $current) { break }
+        $current = $next
+    }
+    if (Test-Path -LiteralPath $full) {
+        foreach ($entry in Get-ChildItem -LiteralPath $full -Recurse -Force) {
+            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Release cleanup tree contains a reparse point.' }
+        }
+        Remove-Item -LiteralPath $full -Recurse -Force
+    }
+}
 if (Test-Path -LiteralPath $releaseRoot) {
-    Remove-Item -LiteralPath $releaseRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-GuardedReleaseDirectory $releaseRoot
 }
 New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 
@@ -49,302 +70,7 @@ Write-Host "Publishing Framework-Dependent $Runtime..." -ForegroundColor Yellow
     --nologo
 if ($LASTEXITCODE -ne 0) { throw "Dotnet publish framework-dependent failed." }
 
-# 3. Generate Install.ps1 and Uninstall.ps1 scripts for distribution packages
-function Add-InstallerScripts([string]$distDir) {
-    $installScript = @'
-param(
-    [switch]$LaunchAfterInstall,
-    [switch]$CreateDesktopShortcut,
-    [switch]$Silent
-)
-
-$ErrorActionPreference = 'Stop'
-$sourceDir = $PSScriptRoot
-$appName = 'SpeedMeter Pro'
-$installDir = Join-Path $env:LOCALAPPDATA 'Programs\SpeedMeterPro'
-$startMenuDir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
-$shortcutPath = Join-Path $startMenuDir "$appName.lnk"
-$exePath = Join-Path $installDir 'SpeedMeter.App.exe'
-
-if (-not $Silent) {
-    Write-Host "Installing $appName to $installDir..." -ForegroundColor Cyan
-}
-
-# Graceful shutdown handshake (zero Stop-Process -Force)
-$running = Get-Process -Name 'SpeedMeter.App' -ErrorAction SilentlyContinue
-if ($running) {
-    if (-not $Silent) { Write-Host "Requesting graceful shutdown of SpeedMeter Pro..." -ForegroundColor Yellow }
-    try {
-        $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-        if ($sid) {
-            $eventName = "Local\SpeedMeterPro.Shutdown.$sid"
-            $eventHandle = [System.Threading.EventWaitHandle]::OpenExisting($eventName)
-            if ($eventHandle) {
-                [void]$eventHandle.Set()
-                $eventHandle.Dispose()
-            }
-        }
-    } catch { }
-
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    while ($sw.ElapsedMilliseconds -lt 5000) {
-        $active = Get-Process -Name 'SpeedMeter.App' -ErrorAction SilentlyContinue
-        if (-not $active) { break }
-        Start-Sleep -Milliseconds 250
-    }
-
-    $stillRunning = Get-Process -Name 'SpeedMeter.App' -ErrorAction SilentlyContinue
-    if ($stillRunning) {
-        if (-not $Silent) {
-            Write-Host "SpeedMeter Pro could not be closed gracefully. Installation stopped to prevent data corruption." -ForegroundColor Red
-        }
-        exit 1618
-    }
-}
-
-# Transactional staging & upgrade rollback
-$stagingDir = Join-Path $installDir ".staging_$([Guid]::NewGuid().ToString('N'))"
-$backupDir = Join-Path $installDir ".backup_$([Guid]::NewGuid().ToString('N'))"
-if (-not (Test-Path -LiteralPath $installDir)) {
-    New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-}
-New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
-
-try {
-    # Copy from source to staging
-    Copy-Item -Path "$sourceDir\*" -Destination $stagingDir -Recurse -Force
-
-    # If previous install exists, backup
-    $existing = Get-ChildItem -Path $installDir | Where-Object { $_.Name -notlike '.staging_*' -and $_.Name -notlike '.backup_*' }
-    if ($existing.Count -gt 0) {
-        New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-        foreach ($item in $existing) {
-            Move-Item -Path $item.FullName -Destination (Join-Path $backupDir $item.Name) -Force
-        }
-    }
-
-    # Commit staged files
-    Get-ChildItem -Path $stagingDir | ForEach-Object {
-        Move-Item -Path $_.FullName -Destination (Join-Path $installDir $_.Name) -Force
-    }
-
-    if (Test-Path -LiteralPath $stagingDir) { Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue }
-    if (Test-Path -LiteralPath $backupDir) { Remove-Item -LiteralPath $backupDir -Recurse -Force -ErrorAction SilentlyContinue }
-} catch {
-    if (Test-Path -LiteralPath $backupDir) {
-        Get-ChildItem -Path $backupDir | ForEach-Object {
-            Move-Item -Path $_.FullName -Destination (Join-Path $installDir $_.Name) -Force
-        }
-    }
-    if (Test-Path -LiteralPath $stagingDir) { Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue }
-    if (Test-Path -LiteralPath $backupDir) { Remove-Item -LiteralPath $backupDir -Recurse -Force -ErrorAction SilentlyContinue }
-    throw $_
-}
-
-# Create Start Menu Shortcut
-$wscript = New-Object -ComObject WScript.Shell
-$shortcut = $wscript.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = $exePath
-$shortcut.WorkingDirectory = $installDir
-$shortcut.IconLocation = "$exePath,0"
-$shortcut.Description = "SpeedMeter Pro - Precision Network Performance Monitor"
-$shortcut.Save()
-
-# Optional Desktop Shortcut
-if ($CreateDesktopShortcut) {
-    $desktopDir = [Environment]::GetFolderPath('Desktop')
-    $desktopShortcutPath = Join-Path $desktopDir "$appName.lnk"
-    $desktopShortcut = $wscript.CreateShortcut($desktopShortcutPath)
-    $desktopShortcut.TargetPath = $exePath
-    $desktopShortcut.WorkingDirectory = $installDir
-    $desktopShortcut.IconLocation = "$exePath,0"
-    $desktopShortcut.Description = "SpeedMeter Pro"
-    $desktopShortcut.Save()
-}
-
-# Register Windows Uninstall Key (Standard User - HKCU)
-$uninstallRegKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\SpeedMeterPro'
-if (-not (Test-Path -LiteralPath $uninstallRegKey)) {
-    New-Item -Path $uninstallRegKey -Force | Out-Null
-}
-
-Set-ItemProperty -Path $uninstallRegKey -Name 'DisplayName' -Value $appName -Type String
-Set-ItemProperty -Path $uninstallRegKey -Name 'DisplayVersion' -Value '1.0.0-rc.2' -Type String
-Set-ItemProperty -Path $uninstallRegKey -Name 'Publisher' -Value 'SpeedMeter Pro' -Type String
-Set-ItemProperty -Path $uninstallRegKey -Name 'InstallLocation' -Value $installDir -Type String
-Set-ItemProperty -Path $uninstallRegKey -Name 'DisplayIcon' -Value "$exePath,0" -Type String
-Set-ItemProperty -Path $uninstallRegKey -Name 'UninstallString' -Value "powershell.exe -ExecutionPolicy Bypass -File `"$installDir\Uninstall.ps1`"" -Type String
-Set-ItemProperty -Path $uninstallRegKey -Name 'QuietUninstallString' -Value "powershell.exe -ExecutionPolicy Bypass -File `"$installDir\Uninstall.ps1`" -Silent" -Type String
-Set-ItemProperty -Path $uninstallRegKey -Name 'NoModify' -Value 1 -Type DWord
-Set-ItemProperty -Path $uninstallRegKey -Name 'NoRepair' -Value 1 -Type DWord
-
-if (-not $Silent) {
-    Write-Host "$appName installation completed successfully!" -ForegroundColor Green
-}
-
-if ($LaunchAfterInstall) {
-    Start-Process -FilePath $exePath
-}
-'@
-
-    $uninstallScript = @'
-param(
-    [switch]$PurgeUserData,
-    [switch]$Silent
-)
-
-$ErrorActionPreference = 'Stop'
-$appName = 'SpeedMeter Pro'
-$installDir = Join-Path $env:LOCALAPPDATA 'Programs\SpeedMeterPro'
-$userDataDir = Join-Path $env:LOCALAPPDATA 'SpeedMeterPro'
-$startMenuDir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
-$shortcutPath = Join-Path $startMenuDir "$appName.lnk"
-$desktopShortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) "$appName.lnk"
-$uninstallRegKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\SpeedMeterPro'
-$runRegKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-
-if (-not $Silent) {
-    Write-Host "Uninstalling $appName..." -ForegroundColor Cyan
-}
-
-# Graceful shutdown handshake (zero Stop-Process -Force)
-$running = Get-Process -Name 'SpeedMeter.App' -ErrorAction SilentlyContinue
-if ($running) {
-    if (-not $Silent) { Write-Host "Requesting graceful shutdown of SpeedMeter Pro..." -ForegroundColor Yellow }
-    try {
-        $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-        if ($sid) {
-            $eventName = "Local\SpeedMeterPro.Shutdown.$sid"
-            $eventHandle = [System.Threading.EventWaitHandle]::OpenExisting($eventName)
-            if ($eventHandle) {
-                [void]$eventHandle.Set()
-                $eventHandle.Dispose()
-            }
-        }
-    } catch { }
-
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    while ($sw.ElapsedMilliseconds -lt 5000) {
-        $active = Get-Process -Name 'SpeedMeter.App' -ErrorAction SilentlyContinue
-        if (-not $active) { break }
-        Start-Sleep -Milliseconds 250
-    }
-
-    $stillRunning = Get-Process -Name 'SpeedMeter.App' -ErrorAction SilentlyContinue
-    if ($stillRunning) {
-        if (-not $Silent) {
-            Write-Host "SpeedMeter Pro could not be closed gracefully. Uninstallation aborted." -ForegroundColor Red
-        }
-        exit 1618
-    }
-}
-
-# Remove Shortcuts
-if (Test-Path -LiteralPath $shortcutPath) {
-    Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path -LiteralPath $desktopShortcutPath) {
-    Remove-Item -LiteralPath $desktopShortcutPath -Force -ErrorAction SilentlyContinue
-}
-
-# Remove Startup Registry Entry
-try {
-    $currentVal = Get-ItemProperty -Path $runRegKey -Name 'SpeedMeterPro' -ErrorAction SilentlyContinue
-    if ($currentVal) {
-        Remove-ItemProperty -Path $runRegKey -Name 'SpeedMeterPro' -Force -ErrorAction SilentlyContinue
-    }
-} catch { }
-
-# Remove Uninstall Registry Entry
-if (Test-Path -LiteralPath $uninstallRegKey) {
-    Remove-Item -LiteralPath $uninstallRegKey -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-# Handle User Data Directory (%LocalAppData%\SpeedMeterPro)
-if ($PurgeUserData) {
-    if (Test-Path -LiteralPath $userDataDir) {
-        if (-not $Silent) { Write-Host "Purging user data and history database ($userDataDir)..." -ForegroundColor Yellow }
-        Remove-Item -LiteralPath $userDataDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-} else {
-    if (-not $Silent) {
-        Write-Host "Preserved user data and history database at: $userDataDir" -ForegroundColor Gray
-        Write-Host "(Run uninstall with -PurgeUserData to completely erase all historical databases)." -ForegroundColor Gray
-    }
-}
-
-# Remove Program Binaries
-if (Test-Path -LiteralPath $installDir) {
-    if (-not $Silent) { Write-Host "Removing program binaries..." -ForegroundColor Yellow }
-    Get-ChildItem -Path $installDir -Exclude 'Uninstall.ps1' | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-    
-    $cleanupBat = [System.IO.Path]::Combine($env:TEMP, "speedmeter_uninstall_$([Guid]::NewGuid().ToString('N')).bat")
-    $batContent = "@echo off`r`nping 127.0.0.1 -n 2 > nul`r`nrd /s /q `"$installDir`"`r`ndel `"%~f0`""
-    [System.IO.File]::WriteAllText($cleanupBat, $batContent)
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$cleanupBat`"" -WindowStyle Hidden
-}
-
-if (-not $Silent) {
-    Write-Host "$appName has been successfully uninstalled." -ForegroundColor Green
-}
-'@
-
-    $readmeContent = @"
-SpeedMeter Pro 1.0.0-rc.2 (Release Candidate)
-==============================================
-
-Precision Network Performance Monitor for Windows 10/11 x64.
-Standard-user desktop application with zero cloud dependencies and zero accounts.
-
-DISTRIBUTION NOTICE (ADR-012):
-------------------------------
-SpeedMeter Pro is distributed primarily as a standalone canonical installer
-(SpeedMeterPro-1.0.0-rc.2-Setup.exe).
-
-ZIP archives are non-public secondary diagnostic/enterprise archives intended
-strictly for administrative evaluation, testing, and managed enterprise deployment.
-They are NOT supported public portable consumer distributions.
-
-INSTALLATION & DEPLOYMENT:
---------------------------
-1. Standalone Canonical Installer (Primary):
-   Run SpeedMeterPro-1.0.0-rc.2-Setup.exe
-   Interactive GUI setup or silent command line:
-   SpeedMeterPro-1.0.0-rc.2-Setup.exe /S
-
-2. Enterprise / Scripted Deployment:
-   Run Install.ps1 with PowerShell from this diagnostic archive:
-   powershell.exe -ExecutionPolicy Bypass -File .\Install.ps1
-
-   Options:
-   -LaunchAfterInstall      Starts SpeedMeter Pro immediately after setup
-   -CreateDesktopShortcut   Creates a desktop shortcut in addition to the Start Menu shortcut
-
-3. Direct execution (Diagnostic/Lab use only):
-   Run SpeedMeter.App.exe directly from this directory.
-
-UNINSTALLATION:
----------------
-Run Uninstall.ps1 or use Windows Settings > Apps:
-powershell.exe -ExecutionPolicy Bypass -File .\Uninstall.ps1
-
-Options:
--PurgeUserData            Deletes all network history and SQLite databases (%LocalAppData%\SpeedMeterPro)
-
-DATA STORAGE:
--------------
-All historical network telemetry is stored locally on this computer:
-%LocalAppData%\SpeedMeterPro\speedmeter.db
-"@
-
-    Set-Content -Path (Join-Path $distDir 'Install.ps1') -Value $installScript -Encoding UTF8
-    Set-Content -Path (Join-Path $distDir 'Uninstall.ps1') -Value $uninstallScript -Encoding UTF8
-    Set-Content -Path (Join-Path $distDir 'README.txt') -Value $readmeContent -Encoding UTF8
-}
-
-Add-InstallerScripts -distDir $scDir
-Add-InstallerScripts -distDir $fddDir
-
+# 3. ZIPs are diagnostic payloads. The signed graphical Setup is the supported install and uninstall path.
 # 4. Sign Binaries in unpacked distributions
 Write-Host "Signing Self-Contained binaries..." -ForegroundColor Yellow
 & (Join-Path $PSScriptRoot 'sign.ps1') -TargetDir $scDir -Mode $SignMode
@@ -362,11 +88,11 @@ Compress-Archive -Path "$scDir\*" -DestinationPath $scZip -CompressionLevel Opti
 Write-Host "Creating Framework-Dependent ZIP archive: $fddZip..." -ForegroundColor Yellow
 Compress-Archive -Path "$fddDir\*" -DestinationPath $fddZip -CompressionLevel Optimal
 
-# 6. Build and Publish Standalone Canonical Installer (SpeedMeterPro-1.0.0-rc.2-Setup.exe)
+# 6. Build and Publish Standalone Canonical Installer
 Write-Host "Building standalone canonical installer (SpeedMeterPro-$Version-Setup.exe)..." -ForegroundColor Yellow
 $setupPublishDir = Join-Path $releaseRoot 'tmp_setup_build'
 if (Test-Path -LiteralPath $setupPublishDir) {
-    Remove-Item -LiteralPath $setupPublishDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-GuardedReleaseDirectory $setupPublishDir
 }
 
 & $dotnetPath publish (Join-Path $projectRoot 'src\SpeedMeter.Installer\SpeedMeter.Installer.csproj') `
@@ -388,7 +114,7 @@ if (-not (Test-Path -LiteralPath $setupExeSource)) {
 }
 
 Copy-Item -Path $setupExeSource -Destination $setupExeTarget -Force
-Remove-Item -LiteralPath $setupPublishDir -Recurse -Force -ErrorAction SilentlyContinue
+Remove-GuardedReleaseDirectory $setupPublishDir
 
 # Sign Standalone Setup.exe
 Write-Host "Signing Standalone Installer: $setupExeTarget..." -ForegroundColor Yellow

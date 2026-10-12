@@ -107,7 +107,8 @@ public static class V1CoreTruthFixtures
         // 1. Scope UI Protection Fixtures
         check("W3-SCOPE-AUTO-START: Startup with AutoPrimary retains AutoPrimary and selects Automatic (Recommended)", () => V1Wave3Fixtures.RunOnSta(() =>
         {
-            var win = new MainWindow(null);
+            var testRoot = TestDeleteGuard.CreateRoot();
+            var win = new MainWindow(null, Path.Combine(testRoot, "data"));
             try
             {
                 Require(win.AdapterPicker.Items.Count > 0, "AdapterPicker must have items populated.");
@@ -117,13 +118,15 @@ public static class V1CoreTruthFixtures
             }
             finally
             {
-                win.Close();
+                win.CloseForFixture();
+                TestDeleteGuard.DeleteRoot(testRoot);
             }
         }));
 
         check("W3-SCOPE-REFRESH-STABILITY: Inventory refresh preserves active scope, revision, and boundary without rebaseline", () => V1Wave3Fixtures.RunOnSta(() =>
         {
-            var win = new MainWindow(null);
+            var testRoot = TestDeleteGuard.CreateRoot();
+            var win = new MainWindow(null, Path.Combine(testRoot, "data"));
             try
             {
                 var initialMode = win.MonitorSessionInstance.Mode;
@@ -137,13 +140,15 @@ public static class V1CoreTruthFixtures
             }
             finally
             {
-                win.Close();
+                win.CloseForFixture();
+                TestDeleteGuard.DeleteRoot(testRoot);
             }
         }));
 
         check("W3-SCOPE-SELECTED-MISSING: Missing selected adapter preserves selection identity without fallback", () => V1Wave3Fixtures.RunOnSta(() =>
         {
-            var win = new MainWindow(null);
+            var testRoot = TestDeleteGuard.CreateRoot();
+            var win = new MainWindow(null, Path.Combine(testRoot, "data"));
             try
             {
                 win.SimulateUserSelectAdapter("test-nic-alpha");
@@ -164,13 +169,15 @@ public static class V1CoreTruthFixtures
             }
             finally
             {
-                win.Close();
+                win.CloseForFixture();
+                TestDeleteGuard.DeleteRoot(testRoot);
             }
         }));
 
         check("W3-SCOPE-SELECTED-RETURN: Returning selected adapter resumes selection without fallback", () => V1Wave3Fixtures.RunOnSta(() =>
         {
-            var win = new MainWindow(null);
+            var testRoot = TestDeleteGuard.CreateRoot();
+            var win = new MainWindow(null, Path.Combine(testRoot, "data"));
             try
             {
                 win.SimulateUserSelectAdapter("test-nic-reconnect");
@@ -188,13 +195,15 @@ public static class V1CoreTruthFixtures
             }
             finally
             {
-                win.Close();
+                win.CloseForFixture();
+                TestDeleteGuard.DeleteRoot(testRoot);
             }
         }));
 
         check("W3-SCOPE-PROGRAMMATIC-GUARD: Programmatic list updates do not fire user selection events", () => V1Wave3Fixtures.RunOnSta(() =>
         {
-            var win = new MainWindow(null);
+            var testRoot = TestDeleteGuard.CreateRoot();
+            var win = new MainWindow(null, Path.Combine(testRoot, "data"));
             try
             {
                 Require(win.MonitorSessionInstance.Mode == ScopeMode.AutoPrimary, "Baseline mode must be AutoPrimary.");
@@ -208,7 +217,8 @@ public static class V1CoreTruthFixtures
             }
             finally
             {
-                win.Close();
+                win.CloseForFixture();
+                TestDeleteGuard.DeleteRoot(testRoot);
             }
         }));
 

@@ -20,6 +20,7 @@ public sealed class SingleInstanceCoordinator : IDisposable
     private const int SwRestore = 9;
     private readonly string userSid;
     private readonly string? customInstanceKey;
+    private readonly string? lockDirectory;
     private Mutex? mutex;
     private FileStream? lockFileStream;
     private bool isOwner;
@@ -28,9 +29,10 @@ public sealed class SingleInstanceCoordinator : IDisposable
     public string UserSid => userSid;
     public bool IsOwner => isOwner;
 
-    public SingleInstanceCoordinator(string? customInstanceKey = null)
+    public SingleInstanceCoordinator(string? customInstanceKey = null, string? lockDirectory = null)
     {
         this.customInstanceKey = customInstanceKey;
+        this.lockDirectory = lockDirectory;
         this.userSid = GetEffectiveUserSid();
     }
 
@@ -88,7 +90,7 @@ public sealed class SingleInstanceCoordinator : IDisposable
         // Second layer: per-user canonical data store lock file
         try
         {
-            var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SpeedMeterPro");
+            var dataDir = lockDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SpeedMeterPro");
             Directory.CreateDirectory(dataDir);
             var lockFilePath = Path.Combine(dataDir, $"speedmeter.owner.{key}.lock");
             lockFileStream = new FileStream(lockFilePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);

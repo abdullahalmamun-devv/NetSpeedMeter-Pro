@@ -62,9 +62,11 @@ public sealed class ApplicationContext : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(provider);
 
-        var dataDir = GetDefaultDataDirectory();
-        var effectiveDbPath = dbPath ?? Path.Combine(dataDir, "speedmeter.db");
-        var effectiveSettingsPath = settingsPath ?? Path.Combine(dataDir, "settings.json");
+        // An explicitly supplied pair is an isolated store. Do not create or
+        // inspect the normal user's product directory as a side effect.
+        var dataDir = dbPath is null || settingsPath is null ? GetDefaultDataDirectory() : null;
+        var effectiveDbPath = dbPath ?? Path.Combine(dataDir!, "speedmeter.db");
+        var effectiveSettingsPath = settingsPath ?? Path.Combine(dataDir!, "settings.json");
 
         this.storage = explicitStorage ?? new SqliteStorageEngine(effectiveDbPath);
         this.settingsService = explicitSettingsService ?? new SettingsService(effectiveSettingsPath);

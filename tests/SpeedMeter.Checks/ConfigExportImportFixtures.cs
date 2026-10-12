@@ -58,7 +58,8 @@ public static class ConfigExportImportFixtures
     private static void TestExportFileAtomic()
     {
         var service = new ConfigExportImportService();
-        var tempDir = Path.Combine(Path.GetTempPath(), "speedmeter_test_" + Guid.NewGuid().ToString("N"));
+        var testRoot = TestDeleteGuard.CreateRoot();
+        var tempDir = Path.Combine(testRoot, "exports");
         Directory.CreateDirectory(tempDir);
         var targetFile = Path.Combine(tempDir, "exported_config.json");
 
@@ -79,7 +80,7 @@ public static class ConfigExportImportFixtures
         }
         finally
         {
-            try { Directory.Delete(tempDir, true); } catch { }
+            TestDeleteGuard.DeleteRoot(testRoot);
         }
     }
 

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -45,6 +46,7 @@ public sealed class UpdateService : IUpdateService, IDisposable
     private readonly string? databasePath;
     private readonly SigningTrustMode trustMode;
     private readonly Action<string, SigningTrustMode, string> verifyAuthenticode;
+    private readonly Action<string, IReadOnlyList<string>> launchInstaller;
     private readonly SemaphoreSlim operation = new(1, 1);
     private UpdateStatus status = new(UpdateState.Idle, "Updates have not been checked.");
     private string? verifiedInstallerPath;
@@ -52,12 +54,48 @@ public sealed class UpdateService : IUpdateService, IDisposable
     public UpdateStatus Status => status;
     public event Action<UpdateStatus>? StatusChanged;
 
+    private bool IsLabLoopback => trustMode == SigningTrustMode.DevelopmentTest && manifestUri.IsLoopback;
+
+#if SPEEDMETER_UPDATE_LAB
+    private sealed record DevelopmentLabConfiguration(Uri ManifestUri, string StagingDirectory, string? DatabasePath);
+    private static DevelopmentLabConfiguration? developmentLabConfiguration;
+
+    /// <summary>
+    /// Available only in a separately compiled development lab build. There is no
+    /// CLI, settings, or environment-variable switch in the consumer binary.
+    /// </summary>
+    public static void ConfigureDevelopmentLab(Uri manifestUri, string labRoot, string? databasePath)
+    {
+        ArgumentNullException.ThrowIfNull(manifestUri);
+        var root = TestSandboxGuard.ValidateRoot(labRoot);
+        if (!manifestUri.IsLoopback ||
+            (manifestUri.Scheme != Uri.UriSchemeHttp && manifestUri.Scheme != Uri.UriSchemeHttps) ||
+            manifestUri.UserInfo.Length != 0)
+            throw new SecurityException("Development update manifest must use a loopback origin.");
+        var staging = TestSandboxGuard.ValidateChild(Path.Combine(root, "update-staging"), root);
+        var database = databasePath is null ? null : TestSandboxGuard.ValidateChild(databasePath, root);
+        var configuration = new DevelopmentLabConfiguration(manifestUri, staging, database);
+        if (Interlocked.CompareExchange(ref developmentLabConfiguration, configuration, null) is not null)
+            throw new InvalidOperationException("Development update lab was already configured.");
+    }
+
+    private static DevelopmentLabConfiguration RequireDevelopmentLab() =>
+        developmentLabConfiguration ?? throw new InvalidOperationException(
+            "Development update lab must be configured before creating the application window.");
+
     public UpdateService(ISettingsService settings)
-        : this(settings, null, null, null, null, SigningTrustMode.Production, null) { }
+        : this(settings, null, RequireDevelopmentLab().StagingDirectory,
+            RequireDevelopmentLab().DatabasePath, RequireDevelopmentLab().ManifestUri,
+            SigningTrustMode.DevelopmentTest, null, null) { }
+#else
+    public UpdateService(ISettingsService settings)
+        : this(settings, null, null, null, null, SigningTrustMode.Production, null, null) { }
+#endif
 
     internal UpdateService(ISettingsService settings, HttpClient? http, string? stagingDirectory,
         string? databasePath, Uri? manifestUri, SigningTrustMode trustMode = SigningTrustMode.DevelopmentTest,
-        Action<string, SigningTrustMode, string>? verifyAuthenticode = null)
+        Action<string, SigningTrustMode, string>? verifyAuthenticode = null,
+        Action<string, IReadOnlyList<string>>? launchInstaller = null)
     {
         this.settings = settings ?? throw new ArgumentNullException(nameof(settings));
         this.http = http ?? new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
@@ -67,8 +105,10 @@ public sealed class UpdateService : IUpdateService, IDisposable
         this.databasePath = databasePath;
         this.trustMode = trustMode;
         this.verifyAuthenticode = verifyAuthenticode ?? UpdateVerificationService.VerifyStagedPayloadAuthenticode;
+        this.launchInstaller = launchInstaller ?? LaunchInstallerProcess;
         this.manifestUri = manifestUri ?? new Uri(ManifestUrl);
-        if (this.manifestUri.Scheme != Uri.UriSchemeHttps)
+        if (this.manifestUri.Scheme != Uri.UriSchemeHttps &&
+            !(IsLabLoopback && this.manifestUri.Scheme == Uri.UriSchemeHttp))
             throw new ArgumentException("Update manifest requires HTTPS.", nameof(manifestUri));
         this.http.DefaultRequestHeaders.UserAgent.ParseAdd($"SpeedMeterPro/{ProductIdentity.ProductVersion}");
         CleanupOwnedStaging();
@@ -105,8 +145,7 @@ public sealed class UpdateService : IUpdateService, IDisposable
             timeout.CancelAfter(TimeSpan.FromSeconds(30));
             using var request = new HttpRequestMessage(HttpMethod.Get, manifestUri);
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
-            if (response.RequestMessage?.RequestUri?.Scheme != Uri.UriSchemeHttps)
-                throw new SecurityException("Update manifest redirect left HTTPS.");
+            VerifyResponseOrigin(response);
             response.EnsureSuccessStatusCode();
             if (response.Content.Headers.ContentLength > MaxManifestBytes)
                 throw new SecurityException("Update manifest exceeds the size limit.");
@@ -119,7 +158,7 @@ public sealed class UpdateService : IUpdateService, IDisposable
                 if (bounded.Length + read > MaxManifestBytes) throw new SecurityException("Update manifest exceeds the size limit.");
                 bounded.Write(buffer, 0, read);
             }
-            var manifest = UpdateVerificationService.ParseManifest(Encoding.UTF8.GetString(bounded.ToArray()));
+            var manifest = UpdateVerificationService.ParseManifest(Encoding.UTF8.GetString(bounded.ToArray()), IsLabLoopback);
             if (!UpdateVerificationService.VerifyManifestSignature(manifest,
                     UpdateVerificationService.GetCanonicalManifestBytes(manifest), trustMode))
                 throw new SecurityException("Update manifest signature verification failed.");
@@ -138,11 +177,12 @@ public sealed class UpdateService : IUpdateService, IDisposable
                 throw new SecurityException("Update version does not match its signed channel.");
             var packageUri = new Uri(manifest.PackageUrl);
             var expectedReleasePath = $"/abdullahalmamun-devv/NetSpeedMeter-Pro/releases/download/v{manifest.Version}/";
-            if (!packageUri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) ||
-                !packageUri.IsDefaultPort || packageUri.UserInfo.Length != 0 ||
+            if ((IsLabLoopback ? !SameOrigin(packageUri, manifestUri) :
+                    !packageUri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) || !packageUri.IsDefaultPort) ||
+                packageUri.UserInfo.Length != 0 ||
                 !packageUri.AbsolutePath.StartsWith(expectedReleasePath, StringComparison.Ordinal) ||
                 !packageUri.AbsolutePath.EndsWith("-Setup.exe", StringComparison.OrdinalIgnoreCase))
-                throw new SecurityException("Update package is not a version-pinned GitHub Release installer.");
+                throw new SecurityException("Update package is not an approved version-pinned installer URL.");
             if (manifest.PackageSizeBytes is <= 0 or > MaxPackageBytes || manifest.TargetDbSchemaVersion < ProductIdentity.DatabaseSchemaVersion)
                 throw new SecurityException("Update package size or schema is outside the supported range.");
 
@@ -184,8 +224,7 @@ public sealed class UpdateService : IUpdateService, IDisposable
             timeout.CancelAfter(TimeSpan.FromMinutes(15));
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
-            if (response.RequestMessage?.RequestUri?.Scheme != Uri.UriSchemeHttps)
-                throw new SecurityException("Update package redirect left HTTPS.");
+            VerifyResponseOrigin(response);
             response.EnsureSuccessStatusCode();
             if (response.Content.Headers.ContentLength is { } announced && announced != manifest.PackageSizeBytes)
                 throw new SecurityException("Update package size does not match the signed manifest.");
@@ -261,13 +300,10 @@ public sealed class UpdateService : IUpdateService, IDisposable
                 throw new SecurityException("Staged update changed after verification.");
             verifyAuthenticode(verifiedInstallerPath, trustMode,
                 UpdateTrustAnchor.ExpectedPublisher);
-            var launchedInstaller = Process.Start(new ProcessStartInfo(verifiedInstallerPath)
-            {
-                Arguments = "-Silent -LaunchAfterInstall",
-                UseShellExecute = true,
-                WorkingDirectory = stagingDirectory
-            }) ?? throw new InvalidOperationException("Installer could not be launched.");
-            launchedInstaller.Dispose();
+            // The current executable directory is the installed product location.
+            // No install path from network metadata or mutable user settings is trusted.
+            launchInstaller(verifiedInstallerPath,
+                ["-Silent", "-LaunchAfterInstall", "-Dir", AppContext.BaseDirectory]);
             Publish(UpdateState.Installing, "Verified installer started. SpeedMeter Pro will close while the update runs.", manifest);
         }
         catch
@@ -276,6 +312,30 @@ public sealed class UpdateService : IUpdateService, IDisposable
             throw;
         }
     }
+
+    private static void LaunchInstallerProcess(string installerPath, IReadOnlyList<string> arguments)
+    {
+        var startInfo = new ProcessStartInfo(installerPath)
+        {
+            UseShellExecute = true,
+            WorkingDirectory = Path.GetDirectoryName(installerPath)!
+        };
+        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
+        var launchedInstaller = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Installer could not be launched.");
+        launchedInstaller.Dispose();
+    }
+
+    private void VerifyResponseOrigin(HttpResponseMessage response)
+    {
+        var uri = response.RequestMessage?.RequestUri;
+        if (uri is null || (IsLabLoopback ? !SameOrigin(uri, manifestUri) : uri.Scheme != Uri.UriSchemeHttps))
+            throw new SecurityException("Update response left its approved transport origin.");
+    }
+
+    private static bool SameOrigin(Uri left, Uri right) =>
+        left.Scheme == right.Scheme && left.Host.Equals(right.Host, StringComparison.OrdinalIgnoreCase) &&
+        left.Port == right.Port && left.UserInfo.Length == 0;
 
     private UpdateStatus Publish(UpdateState state, string message, UpdateManifest? manifest = null,
         long downloaded = 0, long total = 0, string? readyPath = null)

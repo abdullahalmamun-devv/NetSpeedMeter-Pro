@@ -21,6 +21,10 @@
 | V1-CONS-INSTALL-001 | Windows Release/Installer | Accessibility, QA, Director | Gate E1, ADR-012/015 | Graphical per-user install/uninstall with default data retention and explicit purge |
 | V1-CONS-CRASH-001 | Reliability/Crash UX | Security, Accessibility, QA, Director | Gate E1, ADR-015 | Bounded redacted local crash reports and next-launch recovery without upload |
 | V1-CONS-RELEASE-001 | Director/Release | Independent QA, Security, Accessibility | Three consumer systems | RC.2 clean source, regression, consumer integration, artifact and evidence |
+| V1-CONS-SAFETY-002 | Installer + Director | Security/Privacy | RC.2 local audit | Guard destructive fixtures and canonical purge; resolve deferred cleanup review before closure |
+| V1-CONS-UPDATE-DRILL-002 | Update/Application + Director | Security, QA | Guarded lab root, updater-capable RC.2 seed | Observe RC.2 app → signed DevelopmentTest manifest → newer RC.3 Setup → restart and data preservation |
+| V1-CONS-ACCESS-NATIVE-002 | Accessibility | Director, QA | Isolated native app and installer | Keyboard, Narrator, contrast and scaling observations on consumer surfaces |
+| V1-CONS-PROVENANCE-002 | Director/Release | QA, Security | Verified source and evidence | Normal Git push, remote SHA agreement and RC.3 field-candidate evidence |
 
 # Queued behind RC.2 consumer closure
 
@@ -32,7 +36,7 @@
 
 # Review
 
-RC.2 Security/Privacy and Accessibility re-reviews are recorded in `docs/reviews/` as CHANGES REQUESTED. The source findings were addressed and the clean-tree, test-signed RC.2 package passed its silent sandbox install/uninstall drill (`docs/evidence/RELEASE-EVIDENCE-v1.0.0-rc.2.md`). Actual RC.1→RC.2 updater/restart and data-preservation evidence, interactive keyboard/Narrator/DPI/High Contrast observations, packet-level privacy, and production signing/hosting remain open. Gate E1 remains the last passed gate; the Director has not accepted RC.2 consumer closure or authorized Gate E2.
+RC.2 Security/Privacy and Accessibility re-reviews are recorded in `docs/reviews/` as CHANGES REQUESTED. The prior clean-tree, test-signed RC.2 package passed its silent sandbox install/uninstall drill (`docs/evidence/RELEASE-EVIDENCE-v1.0.0-rc.2.md`). The required live update is from an updater-capable RC.2 lab seed to newer RC.3; RC.1 cannot perform an updater action added in RC.2. Native accessibility, packet/process-level privacy, public provenance, and production signing/hosting remain open. Gate E1 remains the last passed gate; the Director has not accepted consumer closure or authorized Gate E2.
 
 # Done
 

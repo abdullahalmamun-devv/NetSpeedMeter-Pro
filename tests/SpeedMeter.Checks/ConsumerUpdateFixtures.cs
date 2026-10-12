@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -26,6 +28,9 @@ public static class ConsumerUpdateFixtures
         check("CONS-UPDATE: Package hash and size failures clear staging", InvalidPackageMatrix);
         check("CONS-UPDATE: Cancellation clears partial download", CancelDownload);
         check("CONS-UPDATE: Ready state survives recheck and orphan staging is cleaned on restart", ReadyStateAndRestartCleanup);
+        check("CONS-UPDATE-LAB: Signed PE passes real WinVerifyTrust and publisher before captured launch", SignedPayloadLaunchCapture);
+        check("CONS-UPDATE-LAB: Post-staging tamper blocks installer launch", StagedTamperBlocksLaunch);
+        check("CONS-UPDATE-LAB: Loopback HTTP stays on one origin", LoopbackTransportPolicy);
     }
 
     private static void OptInDefaultNoRequests()
@@ -78,7 +83,7 @@ public static class ConsumerUpdateFixtures
         UpdateTrustAnchor.SetPinnedPublicKeyForTesting(attacker);
         try
         {
-            var manifest = new UpdateManifest(1, "SpeedMeterPro", "rc", "1.0.0-rc.3",
+            var manifest = new UpdateManifest(1, "SpeedMeterPro", "rc", "1.0.0-rc.4",
                 DateTimeOffset.UtcNow, "1.0.0-rc.2", "https://github.com/example/setup.exe",
                 new string('a', 64), 1000, 3, "https://github.com/example/notes", UpdateTrustAnchor.ExpectedPublisher, "");
             var bytes = UpdateVerificationService.GetCanonicalManifestBytes(manifest);
@@ -112,7 +117,7 @@ public static class ConsumerUpdateFixtures
     {
         foreach (var (version, expected) in new[]
         {
-            ("1.0.0-rc.3", UpdateState.Available),
+            ("1.0.0-rc.4", UpdateState.Available),
             (ProductIdentity.ProductVersion, UpdateState.UpToDate),
             ("1.0.0-rc.1", UpdateState.UpToDate)
         })
@@ -129,7 +134,7 @@ public static class ConsumerUpdateFixtures
     private static void TamperedServiceManifest()
     {
         using var fixture = new UpdateFixture();
-        fixture.ServeSignedRelease("1.0.0-rc.3", tamperVersionAfterSigning: true);
+        fixture.ServeSignedRelease("1.0.0-rc.4", tamperVersionAfterSigning: true);
         var result = fixture.Service.CheckAsync(manual: true).GetAwaiter().GetResult();
         Require(result.State == UpdateState.Failed && fixture.Settings.CurrentSettings.LastSuccessfulUpdateCheckUtc is null,
             "Tampered manifest was accepted by consumer service.");
@@ -140,7 +145,7 @@ public static class ConsumerUpdateFixtures
         foreach (var mismatch in new[] { "hash", "size" })
         {
             using var fixture = new UpdateFixture();
-            fixture.ServeSignedRelease("1.0.0-rc.3", mismatch: mismatch);
+            fixture.ServeSignedRelease("1.0.0-rc.4", mismatch: mismatch);
             Require(fixture.Service.CheckAsync(manual: true).GetAwaiter().GetResult().State == UpdateState.Available,
                 "Signed update was not offered before package test.");
             var result = fixture.Service.DownloadAndVerifyAsync().GetAwaiter().GetResult();
@@ -153,7 +158,7 @@ public static class ConsumerUpdateFixtures
     private static void CancelDownload()
     {
         using var fixture = new UpdateFixture();
-        fixture.ServeSignedRelease("1.0.0-rc.3", slowPackage: true);
+        fixture.ServeSignedRelease("1.0.0-rc.4", slowPackage: true);
         Require(fixture.Service.CheckAsync(manual: true).GetAwaiter().GetResult().State == UpdateState.Available,
             "Signed update was not offered before cancellation test.");
         using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
@@ -165,7 +170,7 @@ public static class ConsumerUpdateFixtures
     private static void ReadyStateAndRestartCleanup()
     {
         using var fixture = new UpdateFixture();
-        fixture.ServeSignedRelease("1.0.0-rc.3");
+        fixture.ServeSignedRelease("1.0.0-rc.4");
         Require(fixture.Service.CheckAsync(manual: true).GetAwaiter().GetResult().State == UpdateState.Available,
             "Signed update was not offered.");
         var ready = fixture.Service.DownloadAndVerifyAsync().GetAwaiter().GetResult();
@@ -179,6 +184,112 @@ public static class ConsumerUpdateFixtures
         Require(!File.Exists(ready.ReadyInstallerPath), "Orphan ready installer was not removed on next launch.");
     }
 
+    private static void SignedPayloadLaunchCapture()
+    {
+        if (!OperatingSystem.IsWindows()) throw new SkipCheckException("WinVerifyTrust requires Windows.");
+        var signedPe = FindSignedFixturePe();
+        using var fixture = new UpdateFixture();
+        fixture.ServeSignedPackageFile("1.0.0-rc.4", signedPe);
+        string? launchedPath = null;
+        IReadOnlyList<string>? launchedArguments = null;
+        var deniedWriteWhileLaunching = false;
+        using var service = fixture.CreateRealVerifierService((path, arguments) =>
+        {
+            launchedPath = path;
+            launchedArguments = arguments.ToArray();
+            try
+            {
+                using var forbidden = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None);
+            }
+            catch (IOException) { deniedWriteWhileLaunching = true; }
+        });
+        Require(service.CheckAsync(manual: true).GetAwaiter().GetResult().State == UpdateState.Available,
+            "Signed manifest did not reach Available.");
+        var ready = service.DownloadAndVerifyAsync().GetAwaiter().GetResult();
+        Require(ready.State == UpdateState.ReadyToInstall && File.Exists(ready.ReadyInstallerPath),
+            "Real Authenticode verification did not reach ReadyToInstall.");
+        service.InstallVerifiedUpdate();
+        Require(service.Status.State == UpdateState.Installing && launchedPath == ready.ReadyInstallerPath &&
+                launchedArguments is not null && launchedArguments.SequenceEqual(
+                    new[] { "-Silent", "-LaunchAfterInstall", "-Dir", AppContext.BaseDirectory }) &&
+                deniedWriteWhileLaunching,
+            "Verified launch contract or staging write lock failed.");
+        Require(fixture.Handler.RequestCount == 2, "Expected one manifest and one package retrieval.");
+    }
+
+    private static void StagedTamperBlocksLaunch()
+    {
+        if (!OperatingSystem.IsWindows()) throw new SkipCheckException("WinVerifyTrust requires Windows.");
+        var signedPe = FindSignedFixturePe();
+        using var fixture = new UpdateFixture();
+        fixture.ServeSignedPackageFile("1.0.0-rc.4", signedPe);
+        var launches = 0;
+        using var service = fixture.CreateRealVerifierService((_, _) => launches++);
+        Require(service.CheckAsync(manual: true).GetAwaiter().GetResult().State == UpdateState.Available,
+            "Signed manifest did not reach Available.");
+        var ready = service.DownloadAndVerifyAsync().GetAwaiter().GetResult();
+        Require(ready.State == UpdateState.ReadyToInstall && ready.ReadyInstallerPath is not null,
+            "Signed package did not reach ReadyToInstall.");
+        using (var file = new FileStream(ready.ReadyInstallerPath!, FileMode.Append, FileAccess.Write, FileShare.None))
+            file.WriteByte(0xA5);
+        var rejected = false;
+        try { service.InstallVerifiedUpdate(); } catch { rejected = true; }
+        Require(rejected && launches == 0 && service.Status.State == UpdateState.Failed,
+            "Tampered staged package was launched or failure state was missing.");
+    }
+
+    private static void LoopbackTransportPolicy()
+    {
+        var loopbackManifest = new Uri("http://127.0.0.1:34567/updates/rc.json");
+        using (var fixture = new UpdateFixture(loopbackManifest))
+        {
+            fixture.ServeSignedRelease("1.0.0-rc.4");
+            Require(fixture.Service.CheckAsync(manual: true).GetAwaiter().GetResult().State == UpdateState.Available,
+                "Signed loopback manifest was not offered in the lab seam.");
+            Require(fixture.Service.DownloadAndVerifyAsync().GetAwaiter().GetResult().State == UpdateState.ReadyToInstall,
+                "Same-origin loopback package was not staged.");
+        }
+        using (var fixture = new UpdateFixture(loopbackManifest))
+        {
+            fixture.ServeSignedRelease("1.0.0-rc.4");
+            var original = fixture.Handler.ResponseFactory!;
+            fixture.Handler.ResponseFactory = async (request, token) =>
+            {
+                var response = await original(request, token);
+                response.RequestMessage = new HttpRequestMessage(HttpMethod.Get, "http://off-origin.example/updates/rc.json");
+                return response;
+            };
+            Require(fixture.Service.CheckAsync(manual: true).GetAwaiter().GetResult().State == UpdateState.Failed,
+                "Off-origin redirect was accepted by lab transport policy.");
+        }
+    }
+
+    private static string FindSignedFixturePe()
+    {
+        var directory = AppContext.BaseDirectory;
+        while (!string.IsNullOrEmpty(directory) && !Directory.Exists(Path.Combine(directory, "artifacts", "release")))
+            directory = Path.GetDirectoryName(directory);
+        if (string.IsNullOrEmpty(directory)) throw new SkipCheckException("No local release artifact directory is available.");
+        var candidates = new[]
+        {
+            Path.Combine(directory, "artifacts", "release", "1.0.0-rc.2", "SpeedMeterPro-1.0.0-rc.2-win-x64-fdd", "SpeedMeter.App.exe"),
+            Path.Combine(directory, "artifacts", "release", "1.0.0-rc.2", "SpeedMeterPro-1.0.0-rc.2-win-x64", "SpeedMeter.App.exe"),
+            Path.Combine(directory, "artifacts", "release", "SpeedMeterPro-1.0.0-rc.1-win-x64-fdd", "SpeedMeter.App.exe")
+        };
+        foreach (var candidate in candidates)
+        {
+            if (!File.Exists(candidate)) continue;
+            try
+            {
+                UpdateVerificationService.VerifyStagedPayloadAuthenticode(candidate,
+                    SigningTrustMode.DevelopmentTest, UpdateTrustAnchor.ExpectedPublisher);
+                return candidate;
+            }
+            catch { }
+        }
+        throw new SkipCheckException("No development-signed SpeedMeter PE is available for the lab fixture.");
+    }
+
     private static void Require(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
@@ -186,18 +297,19 @@ public static class ConsumerUpdateFixtures
 
     private sealed class UpdateFixture : IDisposable
     {
-        private readonly string directory = Path.Combine(Path.GetTempPath(), "speedmeter_update_fixture_" + Guid.NewGuid().ToString("N"));
+        private readonly string directory = TestDeleteGuard.CreateRoot();
         private readonly HttpClient http;
         private readonly RSA signingKey = RSA.Create(2048);
-        private readonly Uri manifestUri = new("https://example.test/updates/rc.json");
+        private readonly Uri manifestUri;
         public SettingsService Settings { get; }
         public CountingHandler Handler { get; } = new();
         public UpdateService Service { get; }
         public string StagingDirectory => Path.Combine(directory, "staging");
         public int AuthenticodeCalls { get; private set; }
 
-        public UpdateFixture()
+        public UpdateFixture(Uri? manifestUriOverride = null)
         {
+            manifestUri = manifestUriOverride ?? new Uri("https://example.test/updates/rc.json");
             Directory.CreateDirectory(directory);
             UpdateTrustAnchor.SetPinnedPublicKeyForTesting(signingKey);
             Settings = new SettingsService(Path.Combine(directory, "settings.json"));
@@ -207,6 +319,34 @@ public static class ConsumerUpdateFixtures
 
         public UpdateService CreateNewService() => new(Settings, http, StagingDirectory, null,
             manifestUri, SigningTrustMode.DevelopmentTest, (_, _, _) => AuthenticodeCalls++);
+
+        public UpdateService CreateRealVerifierService(Action<string, IReadOnlyList<string>> captureLaunch) =>
+            new(Settings, http, StagingDirectory, null, manifestUri,
+                SigningTrustMode.DevelopmentTest, null, captureLaunch);
+
+        public void ServeSignedPackageFile(string version, string signedFile)
+        {
+            using var file = File.OpenRead(signedFile);
+            var hash = UpdateVerificationService.ComputeSha256(file);
+            var size = file.Length;
+            var manifest = new UpdateManifest(1, "SpeedMeterPro", "rc", version, DateTimeOffset.UtcNow,
+                "1.0.0-rc.1",
+                $"{(manifestUri.IsLoopback ? manifestUri.GetLeftPart(UriPartial.Authority) : "https://github.com")}/abdullahalmamun-devv/NetSpeedMeter-Pro/releases/download/v{version}/SpeedMeterPro-{version}-Setup.exe",
+                hash, size, 3, "https://github.com/abdullahalmamun-devv/NetSpeedMeter-Pro/releases",
+                UpdateTrustAnchor.ExpectedPublisher, "");
+            manifest = manifest with { Signature = Convert.ToBase64String(signingKey.SignData(
+                UpdateVerificationService.GetCanonicalManifestBytes(manifest), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)) };
+            var json = JsonSerializer.Serialize(manifest);
+            Handler.ResponseFactory = (request, _) =>
+            {
+                HttpContent content = request.RequestUri == manifestUri
+                    ? new StringContent(json)
+                    : new StreamContent(new FileStream(signedFile, FileMode.Open, FileAccess.Read, FileShare.Read));
+                if (request.RequestUri != manifestUri) content.Headers.ContentLength = size;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                { RequestMessage = request, Content = content });
+            };
+        }
 
         public void ServeSignedRelease(string version, string? mismatch = null, bool tamperVersionAfterSigning = false,
             bool slowPackage = false)
@@ -218,12 +358,12 @@ public static class ConsumerUpdateFixtures
             var size = package.LongLength + (mismatch == "size" ? 1 : 0);
             var manifest = new UpdateManifest(1, "SpeedMeterPro", "rc", version, DateTimeOffset.UtcNow,
                 "1.0.0-rc.1",
-                $"https://github.com/abdullahalmamun-devv/NetSpeedMeter-Pro/releases/download/v{version}/SpeedMeterPro-{version}-Setup.exe",
+                $"{(manifestUri.IsLoopback ? manifestUri.GetLeftPart(UriPartial.Authority) : "https://github.com")}/abdullahalmamun-devv/NetSpeedMeter-Pro/releases/download/v{version}/SpeedMeterPro-{version}-Setup.exe",
                 hash, size, 3, "https://github.com/abdullahalmamun-devv/NetSpeedMeter-Pro/releases",
                 UpdateTrustAnchor.ExpectedPublisher, "");
             var bytes = UpdateVerificationService.GetCanonicalManifestBytes(manifest);
             manifest = manifest with { Signature = Convert.ToBase64String(signingKey.SignData(bytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)) };
-            if (tamperVersionAfterSigning) manifest = manifest with { Version = "1.0.0-rc.4" };
+            if (tamperVersionAfterSigning) manifest = manifest with { Version = "1.0.0-rc.5" };
             var json = JsonSerializer.Serialize(manifest);
             Handler.ResponseFactory = (request, _) =>
             {
@@ -243,7 +383,7 @@ public static class ConsumerUpdateFixtures
             http.Dispose();
             UpdateTrustAnchor.ResetPinnedKeyForTesting();
             signingKey.Dispose();
-            try { Directory.Delete(directory, true); } catch { }
+            TestDeleteGuard.DeleteRoot(directory);
         }
     }
 

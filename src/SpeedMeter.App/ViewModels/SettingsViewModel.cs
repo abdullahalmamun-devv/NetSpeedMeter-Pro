@@ -231,7 +231,9 @@ public sealed class SettingsViewModel : ViewModelBase
 
             s.Sanitize();
             settingsService.Save(s);
+#if !SPEEDMETER_UPDATE_LAB
             StartupHelper.SetStartupEnabled(startWithWindows);
+#endif
             ThemeManager.ApplyTheme(s.Theme);
 
             StatusMessage = "Settings saved successfully.";
@@ -249,7 +251,9 @@ public sealed class SettingsViewModel : ViewModelBase
             var def = new SpeedMeterSettings();
             def.Sanitize();
             settingsService.Save(def);
+#if !SPEEDMETER_UPDATE_LAB
             StartupHelper.SetStartupEnabled(false);
+#endif
             ThemeManager.ApplyTheme("Dark");
             LoadCurrent();
             StatusMessage = "Settings reset to defaults.";

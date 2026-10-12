@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using SpeedMeter.Application;
+using SpeedMeter.Core;
 
 namespace SpeedMeter.App;
 
@@ -23,15 +24,54 @@ public partial class App : System.Windows.Application
 
         var keyIndex = Array.IndexOf(e.Args, "--instance-key");
         var customKey = keyIndex >= 0 && e.Args.Length > keyIndex + 1 ? e.Args[keyIndex + 1] : null;
+        var smokeIndex = Array.IndexOf(e.Args, "--smoke");
+        var smokeDirectory = smokeIndex >= 0 && e.Args.Length > smokeIndex + 1 ? Path.GetFullPath(e.Args[smokeIndex + 1]) : null;
+        var testRootIndex = Array.IndexOf(e.Args, "--test-root");
+        string? isolatedDataDirectory = null;
+        if (smokeIndex >= 0 && smokeDirectory is null)
+            throw new InvalidOperationException("UI smoke requires an output directory.");
+        if (testRootIndex >= 0 && e.Args.Length <= testRootIndex + 1)
+            throw new InvalidOperationException("Test root is missing.");
+        if (testRootIndex >= 0 || smokeIndex >= 0)
+        {
+            // Test data must never fall through to the current user's product store.
+            var testRoot = testRootIndex >= 0
+                ? TestSandboxGuard.ValidateRoot(e.Args[testRootIndex + 1])
+                : TestSandboxGuard.CreateRoot();
+            isolatedDataDirectory = TestSandboxGuard.ValidateChild(Path.Combine(testRoot, "data"), testRoot);
+            Directory.CreateDirectory(isolatedDataDirectory);
+            customKey ??= Path.GetFileName(testRoot);
+        }
+#if SPEEDMETER_UPDATE_LAB
+        // This branch is compiled only into disposable lab binaries. A normal
+        // consumer build has no environment, CLI or Settings path to test trust.
+        var installDirectory = Path.GetFullPath(AppContext.BaseDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!string.Equals(Path.GetFileName(installDirectory), "install", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Development update lab app must run from its isolated install directory.");
+        var labRoot = TestSandboxGuard.ValidateRoot(Path.GetDirectoryName(installDirectory)!);
+        TestSandboxGuard.ValidateChild(installDirectory, labRoot);
+        isolatedDataDirectory = TestSandboxGuard.ValidateChild(Path.Combine(labRoot, "data"), labRoot);
+        Directory.CreateDirectory(isolatedDataDirectory);
+        var labManifestFile = TestSandboxGuard.ValidateChild(
+            Path.Combine(labRoot, "update-manifest-url.txt"), labRoot);
+        var labManifestUrl = File.ReadAllText(labManifestFile).Trim();
+        if (!Uri.TryCreate(labManifestUrl, UriKind.Absolute, out var labManifestUri))
+            throw new InvalidOperationException("Development update lab manifest URL is invalid.");
+        UpdateService.ConfigureDevelopmentLab(labManifestUri, labRoot,
+            Path.Combine(isolatedDataDirectory, "speedmeter.db"));
+        customKey = Path.GetFileName(labRoot);
+#endif
 
-        coordinator = new SingleInstanceCoordinator(customKey);
+        coordinator = new SingleInstanceCoordinator(customKey, isolatedDataDirectory);
         if (!coordinator.TryAcquireOwnership(out _))
         {
             Shutdown(0);
             return;
         }
 
-        crashReports = new CrashReportService();
+        crashReports = new CrashReportService(isolatedDataDirectory is null
+            ? null : Path.Combine(isolatedDataDirectory, "crashes"));
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
@@ -39,7 +79,8 @@ public partial class App : System.Windows.Application
         try
         {
             recovery = crashReports.BeginRun();
-            operationalLogger = new OperationalLogger();
+            operationalLogger = new OperationalLogger(isolatedDataDirectory is null
+                ? null : Path.Combine(isolatedDataDirectory, "logs"));
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
@@ -61,11 +102,9 @@ public partial class App : System.Windows.Application
 
         SessionEnding += OnSessionEnding;
 
-        var smokeIndex = Array.IndexOf(e.Args, "--smoke");
-        var smokeDirectory = smokeIndex >= 0 && e.Args.Length > smokeIndex + 1 ? Path.GetFullPath(e.Args[smokeIndex + 1]) : null;
         try
         {
-            var window = new MainWindow(smokeDirectory);
+            var window = new MainWindow(smokeDirectory, isolatedDataDirectory);
             MainWindow = window;
             window.Show();
             var priorReport = recovery?.Outcome == PreviousRunOutcome.KnownCrash ? recovery.Report : null;

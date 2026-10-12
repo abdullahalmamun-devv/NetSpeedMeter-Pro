@@ -52,14 +52,18 @@ public partial class MainWindow : Window
         public bool IsAutoPrimary => Id is null;
     }
 
-    public MainWindow(string? smokeDirectory)
+    public MainWindow(string? smokeDirectory, string? isolatedDataDirectory = null)
     {
         this.smokeDirectory = smokeDirectory;
         InitializeComponent();
         Width = Math.Min(Width, SystemParameters.WorkArea.Width);
         Height = Math.Min(Height, SystemParameters.WorkArea.Height);
 
-        monitor = new MonitorSession();
+        monitor = isolatedDataDirectory is null
+            ? new MonitorSession()
+            : new MonitorSession(
+                Path.Combine(isolatedDataDirectory, "speedmeter.db"),
+                Path.Combine(isolatedDataDirectory, "settings.json"));
         widget = new WidgetWindow(OpenDashboard);
 
         viewModel = new MainViewModel(
@@ -753,6 +757,14 @@ public partial class MainWindow : Window
 
     internal void Quit()
     {
+        CloseForFixture();
+        System.Windows.Application.Current.Shutdown();
+    }
+
+    // Fixture windows run without the normal App lifetime. Release the same owned
+    // services without terminating the whole checks process.
+    internal void CloseForFixture()
+    {
         quitting = true;
         displayTimer.Stop();
         monitor.SettingsService.SettingsChanged -= OnSettingsChanged;
@@ -765,6 +777,5 @@ public partial class MainWindow : Window
         widget.Close();
         quickPanel.Close();
         Close();
-        System.Windows.Application.Current.Shutdown();
     }
 }

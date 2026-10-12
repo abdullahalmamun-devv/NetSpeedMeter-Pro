@@ -84,9 +84,10 @@ internal static class ConsumerCrashFixtures
 
     private static void WithDirectory(Action<string> action)
     {
-        var directory = Path.Combine(Path.GetTempPath(), "SpeedMeterCrashFixture-" + Guid.NewGuid().ToString("N"));
+        var testRoot = TestDeleteGuard.CreateRoot();
+        var directory = Path.Combine(testRoot, "crashes");
         try { action(directory); }
-        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+        finally { TestDeleteGuard.DeleteRoot(testRoot); }
     }
 
     private static void Require(bool condition, string message)

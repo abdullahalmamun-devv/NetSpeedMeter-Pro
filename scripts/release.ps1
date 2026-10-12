@@ -8,9 +8,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'common.ps1')
+. (Join-Path $PSScriptRoot 'test-sandbox.ps1')
 
 Write-Host "================================================================" -ForegroundColor Cyan
-Write-Host "   SpeedMeter Pro V1.0 RC.2 Release Candidate Orchestrator   " -ForegroundColor Cyan
+Write-Host "   SpeedMeter Pro V1.0 RC.3 Release Candidate Orchestrator   " -ForegroundColor Cyan
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host "Timestamp: $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss UTC'))"
 Write-Host "Host OS:   $((Get-CimInstance Win32_OperatingSystem).Caption) ($((Get-CimInstance Win32_OperatingSystem).Version))"
@@ -80,7 +81,7 @@ if ($LASTEXITCODE -ne 0) { throw "SBOM generation failed." }
 # 6. Release Checksums (RELEASE-HASHES.sha256)
 Write-Host ""
 Write-Host "[6/6] Generating Authoritative Release Hashes..." -ForegroundColor Yellow
-$releaseDir = Join-Path $projectRoot 'artifacts\release\1.0.0-rc.2'
+$releaseDir = Join-Path $projectRoot 'artifacts\release\1.0.0-rc.3'
 $hashFile = Join-Path $releaseDir 'RELEASE-HASHES.sha256'
 
 $filesToHash = Get-ChildItem -Path $releaseDir -File | Where-Object {
@@ -103,9 +104,9 @@ Write-Host "Wrote authoritative release hashes to: $hashFile" -ForegroundColor G
 # 7. Package Verification Drill & Live Installer Drill
 Write-Host ""
 Write-Host "=== Performing Release Candidate Verification Drill ===" -ForegroundColor Cyan
-$setupExe = Join-Path $releaseDir 'SpeedMeterPro-1.0.0-rc.2-Setup.exe'
+$setupExe = Join-Path $releaseDir 'SpeedMeterPro-1.0.0-rc.3-Setup.exe'
 if (-not (Test-Path -LiteralPath $setupExe)) {
-    throw "Verification drill failed: SpeedMeterPro-1.0.0-rc.2-Setup.exe missing."
+    throw "Verification drill failed: SpeedMeterPro-1.0.0-rc.3-Setup.exe missing."
 }
 
 # Verify Authenticode on Primary Setup.exe
@@ -122,7 +123,8 @@ if ($SignMode -eq 'Production') {
 }
 
 # Live silent install and uninstall drill to sandbox directory
-$drillDir = Join-Path $env:TEMP "speedmeter_rc_drill_$([Guid]::NewGuid().ToString('N'))"
+$drillRoot = New-TestSandboxRoot
+$drillDir = Join-Path $drillRoot 'install'
 
 try {
     Write-Host "Running silent installation drill to sandbox ($drillDir)..." -ForegroundColor Yellow
@@ -177,11 +179,7 @@ try {
     }
     Write-Host "Installation and uninstallation drills verified successfully." -ForegroundColor Green
 } finally {
-    try {
-        if (Test-Path -LiteralPath $drillDir) {
-            Remove-Item -LiteralPath $drillDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    } catch { }
+    Remove-TestSandboxRoot $drillRoot
 }
 
 # 8. Package evidence summary. Gate decisions require independent review.
@@ -196,6 +194,6 @@ if ($SkipTests -or $SkipSmoke -or $AllowDirty) {
 
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Green
-Write-Host "  RC.2 PACKAGE DRILL PASSED -- INDEPENDENT CONSUMER REVIEW REQUIRED" -ForegroundColor Green
+Write-Host "  RC.3 PACKAGE DRILL PASSED -- INDEPENDENT CONSUMER REVIEW REQUIRED" -ForegroundColor Green
 Write-Host "  GATE E2 FIELD VALIDATION NOT AUTHORIZED BY THIS SCRIPT" -ForegroundColor Yellow
 Write-Host "================================================================" -ForegroundColor Green

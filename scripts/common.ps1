@@ -16,6 +16,8 @@ try {
 } catch { }
 Set-Location -LiteralPath $projectRoot
 function Restore-Project([string]$target) {
-    & $dotnetPath restore $target --configfile (Join-Path $projectRoot 'NuGet.Config') --nologo
+    # Keep both ordinary and win-x64 publish graphs in the checked-in lockfiles.
+    # A restore without the release RID otherwise strips the publish graph.
+    & $dotnetPath restore $target -r win-x64 --configfile (Join-Path $projectRoot 'NuGet.Config') --nologo
     if ($LASTEXITCODE -ne 0) { throw 'Restore failed.' }
 }

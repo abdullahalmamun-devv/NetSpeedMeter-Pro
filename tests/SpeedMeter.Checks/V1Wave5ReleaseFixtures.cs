@@ -59,6 +59,33 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
 
     public static int? TryRunChild(string[] args)
     {
+        if (args.Length == 4 && args[0] == "--generate-lab-update-manifest")
+        {
+            var package = Path.GetFullPath(args[1]);
+            var manifestUri = new Uri(args[2], UriKind.Absolute);
+            var output = Path.GetFullPath(args[3]);
+            if (!manifestUri.IsLoopback || manifestUri.Scheme != Uri.UriSchemeHttp ||
+                !File.Exists(package) || !string.Equals(Path.GetFileName(package),
+                    "SpeedMeterPro-1.0.0-rc.3-Setup.exe", StringComparison.Ordinal))
+                throw new InvalidOperationException("Lab manifest requires loopback HTTP and the RC.3 Setup artifact.");
+            var authority = manifestUri.GetLeftPart(UriPartial.Authority);
+            using var packageStream = File.OpenRead(package);
+            var packageHash = Convert.ToHexStringLower(SHA256.HashData(packageStream));
+            var manifest = new UpdateManifest(1, "SpeedMeterPro", "rc", "1.0.0-rc.3",
+                DateTimeOffset.UtcNow, "1.0.0-rc.2",
+                authority + "/abdullahalmamun-devv/NetSpeedMeter-Pro/releases/download/v1.0.0-rc.3/SpeedMeterPro-1.0.0-rc.3-Setup.exe",
+                packageHash,
+                new FileInfo(package).Length, 3,
+                "https://github.com/abdullahalmamun-devv/NetSpeedMeter-Pro/releases",
+                UpdateTrustAnchor.ExpectedPublisher, "");
+            using var key = GetDevTestSigningKey();
+            manifest = manifest with { Signature = Convert.ToBase64String(key.SignData(
+                UpdateVerificationService.GetCanonicalManifestBytes(manifest), HashAlgorithmName.SHA256,
+                RSASignaturePadding.Pkcs1)) };
+            File.WriteAllText(output, System.Text.Json.JsonSerializer.Serialize(manifest));
+            Console.WriteLine($"DevelopmentTest manifest: {output}");
+            return 0;
+        }
         if (args.Length >= 3 && args[0] == "--run-shutdown-harness")
         {
             var userSid = args[1];
@@ -104,8 +131,8 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
     private static void CanonicalVersionIdentityConformity()
     {
         Require(ProductIdentity.Name == "SpeedMeter Pro", "Product name mismatch.");
-        Require(ProductIdentity.ProductVersion == "1.0.0-rc.2", "Product version must be 1.0.0-rc.2.");
-        Require(ProductIdentity.FileVersion == "1.0.0.2", "File version must be 1.0.0.2.");
+        Require(ProductIdentity.ProductVersion == "1.0.0-rc.3", "Product version must be 1.0.0-rc.3.");
+        Require(ProductIdentity.FileVersion == "1.0.0.3", "File version must be 1.0.0.3.");
         Require(ProductIdentity.ReleaseChannel == "rc", "Release channel must be rc.");
         Require(ProductIdentity.DatabaseSchemaVersion == 3, "Database schema version must be 3.");
         Require(!string.IsNullOrWhiteSpace(ProductIdentity.CommitSha), "Commit SHA cannot be empty.");
@@ -262,8 +289,7 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
 
     private static void StagingPathTraversalProtection()
     {
-        var tempStaging = Path.Combine(Path.GetTempPath(), $"speedmeter_staging_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempStaging);
+        var tempStaging = TestDeleteGuard.CreateRoot();
         try
         {
             var resolved = UpdateVerificationService.ValidateAndResolveStagingPath(tempStaging, "update.exe");
@@ -286,14 +312,13 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
         }
         finally
         {
-            try { if (Directory.Exists(tempStaging)) Directory.Delete(tempStaging, true); } catch { }
+            TestDeleteGuard.DeleteRoot(tempStaging);
         }
     }
 
     private static void LiveWriterSqliteSnapshotAndRollbackDrill()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"speedmeter_live_drill_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
+        var tempDir = TestDeleteGuard.CreateRoot();
         var dbPath = Path.Combine(tempDir, "speedmeter.db");
         var backupDir = Path.Combine(tempDir, "backups");
 
@@ -346,7 +371,7 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
         }
         finally
         {
-            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch { }
+            TestDeleteGuard.DeleteRoot(tempDir);
         }
     }
 
@@ -369,8 +394,7 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
 
     private static void OperationalLoggerRotationAndRedaction()
     {
-        var tempLogs = Path.Combine(Path.GetTempPath(), $"speedmeter_logs_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempLogs);
+        var tempLogs = TestDeleteGuard.CreateRoot();
         try
         {
             var logger = new OperationalLogger(tempLogs);
@@ -391,7 +415,7 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
         }
         finally
         {
-            try { if (Directory.Exists(tempLogs)) Directory.Delete(tempLogs, true); } catch { }
+            TestDeleteGuard.DeleteRoot(tempLogs);
         }
     }
 
@@ -434,8 +458,7 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
 
     private static void AuthenticodePublisherEnforcementDrill()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"speedmeter_auth_drill_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
+        var tempDir = TestDeleteGuard.CreateRoot();
         try
         {
             var signedPe = GetOrCreateTestSignedPe(tempDir);
@@ -510,7 +533,7 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
         }
         finally
         {
-            try { Directory.Delete(tempDir, true); } catch { }
+            TestDeleteGuard.DeleteRoot(tempDir);
         }
     }
 
@@ -655,14 +678,16 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
 
     private static void InstallerTransactionalInstallAndRollbackDrill()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"speedmeter_inst_drill_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
-        var targetInstall = Path.Combine(tempDir, "ProgramFiles");
+        var tempDir = TestDeleteGuard.CreateRoot();
+        var targetInstall = Path.Combine(tempDir, "SpeedMeterPro");
         Directory.CreateDirectory(targetInstall);
 
         // Populate V1 binaries
         File.WriteAllText(Path.Combine(targetInstall, "SpeedMeter.App.exe"), "V1_BINARY");
         File.WriteAllText(Path.Combine(targetInstall, "SpeedMeter.Core.dll"), "V1_CORE");
+        File.WriteAllText(Path.Combine(targetInstall, "Uninstall.exe"), "V1_UNINSTALLER");
+        File.WriteAllText(Path.Combine(targetInstall, ".speedmeter-pro-install-root"),
+            InstallerEngine.InstallMarkerContent(targetInstall));
 
         // Prepare invalid V2 payload (missing SpeedMeter.App.exe to trigger commit validation failure)
         var invalidPayloadZip = Path.Combine(tempDir, "invalid_payload.zip");
@@ -697,13 +722,12 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
         Require(File.ReadAllText(Path.Combine(targetInstall, "SpeedMeter.App.exe")) == "V1_BINARY", "V1 binary content was overwritten despite rollback.");
         Require(File.ReadAllText(Path.Combine(targetInstall, "SpeedMeter.Core.dll")) == "V1_CORE", "V1 core content was corrupted despite rollback.");
 
-        try { Directory.Delete(tempDir, true); } catch { }
+        TestDeleteGuard.DeleteRoot(tempDir);
     }
 
     private static void InstallerFreshInstallUpgradeAndUninstallDrill()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"speedmeter_matrix_drill_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
+        var tempDir = TestDeleteGuard.CreateRoot();
         var targetInstall = Path.Combine(tempDir, "Programs", "SpeedMeterPro");
         var userDataDir = Path.Combine(tempDir, "UserData");
         Directory.CreateDirectory(userDataDir);
@@ -737,22 +761,38 @@ vqme0egky9CI5f3VVGbx+iCtj/CF/ogq3STc5ZjzJSY+9kmG2avrW/UJmkN+Aq6w
         var uninstallPreserve = new UninstallOptions(
             InstallDirectory: targetInstall,
             PurgeUserData: false,
-            Silent: true,
-            UserDataDirectory: userDataDir);
+            Silent: true)
+        { TestUserDataDirectory = userDataDir };
 
         // Since we override default userDataDir in test, test logic directly
         Require(File.Exists(dbFile), "User data was lost before uninstall.");
         InstallerEngine.UninstallAsync(uninstallPreserve).GetAwaiter().GetResult();
+        WaitForDirectoryRemoval(targetInstall);
+        Require(File.ReadAllText(dbFile) == "USER_DATABASE_CONTENT", "Preserve uninstall altered fixture data.");
+
+        // A compatible reinstall must leave the retained data available.
+        InstallerEngine.InstallAsync(installOpts).GetAwaiter().GetResult();
+        Require(File.ReadAllText(dbFile) == "USER_DATABASE_CONTENT", "Reinstall did not retain fixture data.");
 
         // 4. Uninstall with Purge User Data
         var uninstallPurge = new UninstallOptions(
             InstallDirectory: targetInstall,
             PurgeUserData: true,
-            Silent: true,
-            UserDataDirectory: userDataDir);
+            Silent: true)
+        { TestUserDataDirectory = userDataDir };
         InstallerEngine.UninstallAsync(uninstallPurge).GetAwaiter().GetResult();
+        WaitForDirectoryRemoval(targetInstall);
+        Require(!Directory.Exists(userDataDir), "Explicit sandbox purge retained fixture data.");
 
-        try { Directory.Delete(tempDir, true); } catch { }
+        TestDeleteGuard.DeleteRoot(tempDir);
+    }
+
+    private static void WaitForDirectoryRemoval(string target)
+    {
+        var wait = Stopwatch.StartNew();
+        while (Directory.Exists(target) && wait.Elapsed < TimeSpan.FromSeconds(8))
+            Thread.Sleep(100);
+        Require(!Directory.Exists(target), "Deferred sandbox uninstall did not remove its owned install directory.");
     }
 
     private static string FindRepoRoot()
@@ -821,6 +861,7 @@ if ($cert) {{
             };
             using var proc = Process.Start(psi);
             proc?.WaitForExit(10000);
+            TestDeleteGuard.RequireChild(tempDir, scriptPath);
             try { File.Delete(scriptPath); } catch { }
         }
 
@@ -829,8 +870,7 @@ if ($cert) {{
 
     private static void EndToEndUpdatePackageVerificationPipelineDrill()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"speedmeter_e2e_update_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
+        var tempDir = TestDeleteGuard.CreateRoot();
         try
         {
             var signedPe = GetOrCreateTestSignedPe(tempDir);
@@ -910,7 +950,7 @@ if ($cert) {{
         }
         finally
         {
-            try { Directory.Delete(tempDir, true); } catch { }
+            TestDeleteGuard.DeleteRoot(tempDir);
         }
     }
 

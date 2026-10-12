@@ -6,12 +6,15 @@ using System.IO.Compression;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+using System.Runtime.CompilerServices;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32;
 using SpeedMeter.Core;
+
+[assembly: InternalsVisibleTo("SpeedMeter.Checks")]
 
 namespace SpeedMeter.Installer;
 
@@ -32,13 +35,18 @@ public sealed record UninstallOptions(
     string? InstallDirectory = null,
     bool PurgeUserData = false,
     bool Silent = false,
-    Action<string>? Log = null,
-    string? UserDataDirectory = null
-);
+    Action<string>? Log = null
+)
+{
+    // Deliberately absent from the public CLI/options contract. Test fixtures alone may
+    // inject an isolated disposable root, and runtime validation still guards that seam.
+    internal string? TestUserDataDirectory { get; init; }
+}
 
 public static class InstallerEngine
 {
     private const int WmClose = 0x0010;
+    private const string InstallMarkerName = ".speedmeter-pro-install-root";
 
     public static string GetDefaultInstallDirectory() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "SpeedMeterPro");
@@ -151,17 +159,23 @@ public static class InstallerEngine
     public static async Task InstallAsync(InstallOptions options)
     {
         var log = options.Log ?? (_ => { });
-        var targetDir = options.TargetDirectory ?? GetDefaultInstallDirectory();
-        var userSid = GetCurrentUserSid();
+        var requestedTarget = options.TargetDirectory ?? GetDefaultInstallDirectory();
+        ValidateInstallTarget(requestedTarget);
+        var targetDir = Path.GetFullPath(requestedTarget);
+        ValidateExistingInstallTarget(targetDir);
+        var labRoot = TryGetLabRoot(targetDir);
+        var shutdownKey = labRoot is null ? GetCurrentUserSid() : Path.GetFileName(labRoot);
 
         log($"Beginning installation of SpeedMeter Pro {ProductIdentity.ProductVersion}...");
         log($"Target Directory: {targetDir}");
 
         // 1. Graceful Shutdown Handshake
-        var runningProcs = GetActiveInstances("SpeedMeter.App");
+        var isCanonicalTarget = SamePath(targetDir, GetDefaultInstallDirectory());
+        var runningProcs = GetActiveInstancesForTarget(targetDir, labTarget: true);
         if (runningProcs.Length > 0)
         {
-            var closed = RequestGracefulShutdown(userSid, TimeSpan.FromSeconds(5), log, "SpeedMeter.App");
+            var closed = RequestTargetGracefulShutdown(isCanonicalTarget || labRoot is not null ? shutdownKey : null,
+                targetDir, TimeSpan.FromSeconds(5), log);
             if (!closed)
             {
                 throw new SpeedMeterRunningException("SpeedMeter Pro is currently running and could not be closed gracefully. Installation stopped to prevent data corruption.");
@@ -201,7 +215,8 @@ public static class InstallerEngine
 
             // 4. Upgrade Backup Phase (if existing installation is present)
             var existingFiles = Directory.GetFiles(targetDir);
-            var isUpgrade = existingFiles.Length > 0;
+            var isUpgrade = Directory.EnumerateFileSystemEntries(targetDir)
+                .Any(path => !SamePath(path, stagingDir));
             if (isUpgrade)
             {
                 log("Backing up previous version for upgrade rollback protection...");
@@ -247,6 +262,10 @@ public static class InstallerEngine
                 File.Copy(currentExe, uninstallExePath, overwrite: true);
                 committedPaths.Add(uninstallExePath);
             }
+
+            var markerPath = Path.Combine(targetDir, InstallMarkerName);
+            File.WriteAllText(markerPath, InstallMarkerContent(targetDir));
+            committedPaths.Add(markerPath);
 
             var targetExe = Path.Combine(targetDir, "SpeedMeter.App.exe");
             // Sandbox installs used by fixtures/release drills must not replace the
@@ -350,17 +369,23 @@ public static class InstallerEngine
     public static async Task UninstallAsync(UninstallOptions options)
     {
         var log = options.Log ?? (_ => { });
-        var targetDir = options.InstallDirectory ?? GetDefaultInstallDirectory();
-        var userDataDir = options.UserDataDirectory ?? GetDefaultUserDataDirectory();
-        var userSid = GetCurrentUserSid();
+        var targetDir = Path.GetFullPath(options.InstallDirectory ?? GetDefaultInstallDirectory());
+        var userDataDir = options.TestUserDataDirectory ?? GetDefaultUserDataDirectory();
+
+        // Validation precedes shutdown, staging cleanup, registry edits, and purge.
+        ValidateUninstallRequest(options);
+        var labRoot = TryGetLabRoot(targetDir);
+        var shutdownKey = labRoot is null ? GetCurrentUserSid() : Path.GetFileName(labRoot);
 
         log("Beginning uninstallation of SpeedMeter Pro...");
 
         // 1. Graceful shutdown check
-        var runningProcs = GetActiveInstances("SpeedMeter.App");
+        var isCanonicalTarget = SamePath(targetDir, GetDefaultInstallDirectory());
+        var runningProcs = GetActiveInstancesForTarget(targetDir, labTarget: true);
         if (runningProcs.Length > 0)
         {
-            var closed = RequestGracefulShutdown(userSid, TimeSpan.FromSeconds(5), log, "SpeedMeter.App");
+            var closed = RequestTargetGracefulShutdown(isCanonicalTarget || labRoot is not null ? shutdownKey : null,
+                targetDir, TimeSpan.FromSeconds(5), log);
             if (!closed)
             {
                 throw new SpeedMeterRunningException("SpeedMeter Pro is running and could not be closed gracefully. Uninstallation aborted.");
@@ -369,8 +394,10 @@ public static class InstallerEngine
 
         // Delete selected data before unregistering the app so a failed purge remains retryable
         // from Windows Settings. Retained data is never touched except for downloaded packages.
+        var isCanonicalInstall = SamePath(targetDir, GetDefaultInstallDirectory());
+        var touchUserData = options.TestUserDataDirectory is not null || options.PurgeUserData || isCanonicalInstall;
         var updateStagingDir = Path.Combine(userDataDir, "staging");
-        if (Directory.Exists(updateStagingDir))
+        if (touchUserData && Directory.Exists(updateStagingDir))
         {
             try { Directory.Delete(updateStagingDir, recursive: true); }
             catch (Exception ex) { log($"Warning: Could not remove staged update packages: {ex.Message}"); }
@@ -387,7 +414,7 @@ public static class InstallerEngine
         }
 
         // 2. Remove shell integration only for the canonical per-user install.
-        if (Path.GetFullPath(targetDir).Equals(Path.GetFullPath(GetDefaultInstallDirectory()), StringComparison.OrdinalIgnoreCase))
+        if (isCanonicalInstall)
         {
             log("Removing application shortcuts and Windows entries...");
             var startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Start Menu\Programs");
@@ -413,13 +440,250 @@ public static class InstallerEngine
         log("Removing application program files...");
         if (Directory.Exists(targetDir))
         {
+            // The deferred cmd helper receives only a fully validated, product-owned path.
+            // Reject CMD expansion/control characters until this legacy helper is replaced.
             var cleanupBat = Path.Combine(Path.GetTempPath(), $"speedmeter_uninstall_{Guid.NewGuid():N}.bat");
+            RejectCmdCharacters(cleanupBat);
             var batContent = $"@echo off\r\nping 127.0.0.1 -n 2 > nul\r\nrd /s /q \"{targetDir}\"\r\ndel \"%~f0\"";
             await File.WriteAllTextAsync(cleanupBat, batContent);
-            Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"{cleanupBat}\"") { CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden });
+            var cleanup = new ProcessStartInfo("cmd.exe") { CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden };
+            cleanup.ArgumentList.Add("/c");
+            cleanup.ArgumentList.Add(cleanupBat);
+            Process.Start(cleanup);
         }
 
         log("SpeedMeter Pro has been uninstalled.");
+    }
+
+    internal static string InstallMarkerContent(string path) =>
+        "SpeedMeterPro.InstallRoot.v1:" + Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)).ToUpperInvariant();
+
+    internal static void ValidateUninstallRequest(UninstallOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (options.InstallDirectory is not null && !Path.IsPathFullyQualified(options.InstallDirectory))
+            throw new InvalidOperationException("Install location must be absolute.");
+        var target = Path.GetFullPath(options.InstallDirectory ?? GetDefaultInstallDirectory());
+        var canonicalInstall = Path.GetFullPath(GetDefaultInstallDirectory());
+        var realData = Path.GetFullPath(GetDefaultUserDataDirectory());
+        ValidateInstallTarget(options.InstallDirectory ?? GetDefaultInstallDirectory());
+        if (!Directory.Exists(target))
+            throw new InvalidOperationException("Target installation does not exist.");
+        var isOwned = IsOwnedInstall(target);
+        var isLegacyCanonical = SamePath(target, canonicalInstall) &&
+            File.Exists(Path.Combine(target, "Uninstall.exe")) &&
+            File.Exists(Path.Combine(target, "SpeedMeter.App.exe"));
+        if (!isOwned && !isLegacyCanonical)
+            throw new InvalidOperationException("Target is not a recognized SpeedMeter Pro installation.");
+
+        if (options.TestUserDataDirectory is not null)
+        {
+            ValidateTestDataOverride(options.TestUserDataDirectory, target);
+        }
+        else if (options.PurgeUserData || SamePath(target, canonicalInstall))
+        {
+            if (options.PurgeUserData && IsDisposableTestPath(target))
+                throw new InvalidOperationException("A test installation cannot purge real SpeedMeter Pro data.");
+            RejectReparseComponents(realData);
+            if (Directory.Exists(realData)) RejectReparseTree(realData);
+        }
+    }
+
+    private static void ValidateExistingInstallTarget(string target)
+    {
+        if (!Directory.Exists(target) || !Directory.EnumerateFileSystemEntries(target).Any()) return;
+        if (IsOwnedInstall(target)) return;
+        if (SamePath(target, GetDefaultInstallDirectory()) &&
+            File.Exists(Path.Combine(target, "Uninstall.exe")) &&
+            File.Exists(Path.Combine(target, "SpeedMeter.App.exe"))) return;
+        throw new InvalidOperationException("Install location already contains files that are not a recognized SpeedMeter Pro installation.");
+    }
+
+    private static bool IsOwnedInstall(string target)
+    {
+        var marker = Path.Combine(target, InstallMarkerName);
+        return File.Exists(marker) &&
+            File.Exists(Path.Combine(target, "Uninstall.exe")) &&
+            File.Exists(Path.Combine(target, "SpeedMeter.App.exe")) &&
+            string.Equals(File.ReadAllText(marker), InstallMarkerContent(target), StringComparison.Ordinal);
+    }
+
+    private static void ValidateInstallTarget(string path)
+    {
+        if (!Path.IsPathFullyQualified(path))
+            throw new InvalidOperationException("Install location must be absolute.");
+        foreach (var segment in path.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                     StringSplitOptions.RemoveEmptyEntries))
+            if (segment is "." or "..")
+                throw new InvalidOperationException("Install location must not contain dot segments.");
+        var target = Path.GetFullPath(path);
+        var leaf = Path.GetFileName(Path.TrimEndingDirectorySeparator(target));
+        var isProductLeaf = string.Equals(leaf, "SpeedMeterPro", StringComparison.OrdinalIgnoreCase);
+        var isTestInstallLeaf = string.Equals(leaf, "install", StringComparison.OrdinalIgnoreCase) &&
+            IsValidDisposableInstallTarget(target);
+        if (!isProductLeaf && !isTestInstallLeaf)
+            throw new InvalidOperationException("Install location must be a dedicated SpeedMeterPro directory.");
+        var profile = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        var realData = Path.GetFullPath(GetDefaultUserDataDirectory());
+
+        // A deferred batch remains in RC.2. Do not let cmd parse any part of a path as
+        // an expansion, command separator, grouping operator, or redirection.
+        RejectCmdCharacters(target);
+        if (SameOrChild(target, profile) || SameOrChild(target, realData) || SameOrChild(realData, target))
+            throw new InvalidOperationException("Install location cannot contain the user profile or SpeedMeter Pro data.");
+        RejectReparseComponents(target);
+        if (Directory.Exists(target)) RejectReparseTree(target);
+    }
+
+    private static void RejectCmdCharacters(string path)
+    {
+        if (path.IndexOfAny(['%', '!', '^', '&', '|', '<', '>', '(', ')', '"', '\r', '\n']) >= 0)
+            throw new InvalidOperationException("Path contains unsupported command characters.");
+    }
+
+    private static void ValidateTestDataOverride(string dataPath, string target)
+    {
+        if (!Path.IsPathFullyQualified(dataPath))
+            throw new InvalidOperationException("Test data path must be absolute.");
+        var data = Path.GetFullPath(dataPath);
+        var root = Path.GetDirectoryName(data)
+            ?? throw new InvalidOperationException("Test data path has no disposable parent.");
+        TestSandboxGuard.ValidateRoot(root);
+        TestSandboxGuard.ValidateChild(dataPath, root);
+        TestSandboxGuard.ValidateChild(target, root);
+        TestSandboxGuard.ValidateTreeForDeletion(data, root);
+        TestSandboxGuard.ValidateTreeForDeletion(target, root);
+    }
+
+    private static string? TryGetLabRoot(string target)
+    {
+#if SPEEDMETER_UPDATE_LAB
+        var parent = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "SpeedMeterPro.Tests"));
+        var relative = Path.GetRelativePath(parent, target);
+        var first = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
+        if (Guid.TryParseExact(first, "N", out _))
+        {
+            var root = TestSandboxGuard.ValidateRoot(Path.Combine(parent, first));
+            TestSandboxGuard.ValidateChild(target, root);
+            return root;
+        }
+#endif
+        return null;
+    }
+
+    private static Process[] GetActiveInstancesForTarget(string target, bool labTarget)
+    {
+        var active = GetActiveInstances("SpeedMeter.App");
+        if (!labTarget) return active;
+        var expectedExe = Path.GetFullPath(Path.Combine(target, "SpeedMeter.App.exe"));
+        var matched = new List<Process>();
+        foreach (var process in active)
+        {
+            try
+            {
+                if (SamePath(process.MainModule?.FileName ?? "", expectedExe)) matched.Add(process);
+            }
+            catch { /* Do not signal an unidentifiable process during a lab run. */ }
+        }
+        return matched.ToArray();
+    }
+
+    private static bool RequestTargetGracefulShutdown(string? key, string target, TimeSpan timeout, Action<string>? log)
+    {
+        log?.Invoke("Requesting target installation shutdown...");
+        var sw = Stopwatch.StartNew();
+        while (sw.Elapsed < timeout)
+        {
+            if (GetActiveInstancesForTarget(target, labTarget: true).Length == 0) return true;
+            if (key is not null) try
+            {
+                if (EventWaitHandle.TryOpenExisting(@"Local\SpeedMeterPro.Shutdown." + key, out var handle))
+                {
+                    handle.Set();
+                    handle.Dispose();
+                }
+            }
+            catch { }
+            foreach (var process in GetActiveInstancesForTarget(target, labTarget: true))
+            {
+                try
+                {
+                    if (process.MainWindowHandle != nint.Zero)
+                        PostMessage(process.MainWindowHandle, WmClose, nint.Zero, nint.Zero);
+                }
+                catch { }
+            }
+            Thread.Sleep(100);
+        }
+        return GetActiveInstancesForTarget(target, labTarget: true).Length == 0;
+    }
+
+    private static bool IsValidDisposableInstallTarget(string target)
+    {
+        try
+        {
+            var root = TestSandboxGuard.ValidateRoot(Path.GetDirectoryName(target)!);
+            TestSandboxGuard.ValidateChild(target, root);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private static bool IsDisposableTestPath(string target)
+    {
+        var temp = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
+        var sharedTestsParent = Path.Combine(temp, "SpeedMeterPro.Tests");
+        if (SameOrChild(sharedTestsParent, target)) return true;
+        var relative = Path.GetRelativePath(temp, target);
+        var first = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
+        const string releasePrefix = "speedmeter_rc_drill_";
+        return first.StartsWith(releasePrefix, StringComparison.OrdinalIgnoreCase) &&
+            Guid.TryParseExact(first[releasePrefix.Length..], "N", out _);
+    }
+
+    private static bool SamePath(string left, string right) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)), StringComparison.OrdinalIgnoreCase);
+
+    private static bool SameOrChild(string parent, string candidate)
+    {
+        var relative = Path.GetRelativePath(parent, candidate);
+        return relative == "." || (!Path.IsPathRooted(relative) && relative != ".." &&
+            !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal));
+    }
+
+    private static void RejectReparseComponents(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(full) ?? throw new InvalidOperationException("Path has no root.");
+        var current = root;
+        foreach (var part in full[root.Length..].Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+        {
+            if (part.Length == 0) continue;
+            current = Path.Combine(current, part);
+            if ((Directory.Exists(current) || File.Exists(current)) &&
+                (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException("A reparse point blocks recursive deletion.");
+        }
+    }
+
+    private static void RejectReparseTree(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException("A reparse point blocks recursive deletion.");
+            foreach (var child in Directory.EnumerateFileSystemEntries(current))
+            {
+                var attributes = File.GetAttributes(child);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidOperationException("A reparse point blocks recursive deletion.");
+                if ((attributes & FileAttributes.Directory) != 0) pending.Push(child);
+            }
+        }
     }
 
     private static void RegisterUninstallKey(string targetDir, string targetExe)

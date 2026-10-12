@@ -742,18 +742,27 @@ internal static class NetworkToolsFixtures
         var userKeyA = "TestUserA_" + Guid.NewGuid().ToString("N");
         var userKeyB = "TestUserB_" + Guid.NewGuid().ToString("N");
 
-        using var coordA = new SingleInstanceCoordinator(userKeyA);
-        var aAcquired = coordA.TryAcquireOwnership(out var resA);
-        Require(aAcquired && resA == SingleInstanceActivationResult.OwnerAcquired, "User A coordinator must acquire ownership.");
+        var testRoot = TestDeleteGuard.CreateRoot();
+        var lockDirectory = Path.Combine(testRoot, "data");
+        try
+        {
+            using var coordA = new SingleInstanceCoordinator(userKeyA, lockDirectory);
+            var aAcquired = coordA.TryAcquireOwnership(out var resA);
+            Require(aAcquired && resA == SingleInstanceActivationResult.OwnerAcquired, "User A coordinator must acquire ownership.");
 
-        using var coordB = new SingleInstanceCoordinator(userKeyB);
-        var bAcquired = coordB.TryAcquireOwnership(out var resB);
-        Require(bAcquired && resB == SingleInstanceActivationResult.OwnerAcquired, "User B coordinator must acquire ownership independently.");
+            using var coordB = new SingleInstanceCoordinator(userKeyB, lockDirectory);
+            var bAcquired = coordB.TryAcquireOwnership(out var resB);
+            Require(bAcquired && resB == SingleInstanceActivationResult.OwnerAcquired, "User B coordinator must acquire ownership independently.");
 
-        // Same user key conflicts and fails to acquire ownership
-        using var coordA2 = new SingleInstanceCoordinator(userKeyA);
-        var a2Acquired = coordA2.TryAcquireOwnership(out var resA2);
-        Require(!a2Acquired, "Second coordinator for User A must fail to acquire ownership.");
+            // Same user key conflicts and fails to acquire ownership.
+            using var coordA2 = new SingleInstanceCoordinator(userKeyA, lockDirectory);
+            var a2Acquired = coordA2.TryAcquireOwnership(out _);
+            Require(!a2Acquired, "Second coordinator for User A must fail to acquire ownership.");
+        }
+        finally
+        {
+            TestDeleteGuard.DeleteRoot(testRoot);
+        }
     }
 
     private static void SingleInstanceProcessLaunchProtection()
@@ -768,7 +777,8 @@ internal static class NetworkToolsFixtures
         if (!File.Exists(exePath)) return;
 
         var instanceKey = "ProcessTest_" + Guid.NewGuid().ToString("N");
-        var tempSmoke = Path.Combine(Path.GetTempPath(), "speedmeter_proc_test_" + Guid.NewGuid().ToString("N"));
+        var testRoot = TestDeleteGuard.CreateRoot();
+        var tempSmoke = Path.Combine(testRoot, "smoke");
         Directory.CreateDirectory(tempSmoke);
 
         Process? p1 = null;
@@ -777,7 +787,7 @@ internal static class NetworkToolsFixtures
             p1 = Process.Start(new ProcessStartInfo
             {
                 FileName = exePath,
-                Arguments = $"--instance-key {instanceKey} --smoke \"{tempSmoke}\"",
+                Arguments = $"--instance-key {instanceKey} --test-root \"{testRoot}\" --smoke \"{tempSmoke}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true
             });
@@ -788,7 +798,7 @@ internal static class NetworkToolsFixtures
             using var p2 = Process.Start(new ProcessStartInfo
             {
                 FileName = exePath,
-                Arguments = $"--instance-key {instanceKey}",
+                Arguments = $"--instance-key {instanceKey} --test-root \"{testRoot}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true
             });
@@ -811,7 +821,7 @@ internal static class NetworkToolsFixtures
                 }
             }
             catch { }
-            try { if (Directory.Exists(tempSmoke)) Directory.Delete(tempSmoke, true); } catch { }
+            TestDeleteGuard.DeleteRoot(testRoot);
         }
     }
 

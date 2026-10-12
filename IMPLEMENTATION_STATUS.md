@@ -1,10 +1,18 @@
 # Implementation status
 
 **Current release:** 1.0.0-rc.2 is the latest packaged, test-signed field/lab candidate, built from clean `RC2ReleaseSourceSha` `b0e425f34ac3033ee36bf2da27ee9d339a9b3bed`. It is not a public production release. RC.1 evidence remains preserved. GA remains blocked.
-**Current milestone:** Gate E1 passed. RC.2 consumer experience closure is **not verified** after independent review; Gate E2 field validation is not authorized. The RC.2 package drill passed, while the real RC.1→RC.2 updater/restart/data-preservation flow, public hosting, production signing, interactive accessibility, and packet-level privacy evidence remain open. See `docs/evidence/RELEASE-EVIDENCE-v1.0.0-rc.2.md`.
+**Current milestone:** Gate E1 passed. RC.2/RC.3 consumer experience closure is **not verified** after independent review; Gate E2 field validation is not authorized. The prior RC.2 package drill passed, while the required updater-capable RC.2 → RC.3 app/restart/data-preservation flow, public hosting, production signing, interactive accessibility, and packet-level privacy evidence remain open. See `docs/evidence/RELEASE-EVIDENCE-v1.0.0-rc.2.md`.
 **Updated:** 12 October 2026 (Asia/Dhaka).
 
 ## Build / test status
+
+### RC.3 closure work in progress (12 October 2026)
+
+- The seven unpublished RC.2 commits were preserved on `backup/consumer-closure-pre-audit`; the local starting HEAD was `8cfc8e96cbb10dfcdb93f35d5b134e58aac89028` and `origin/main` remained `37b5f57a086fcb9d11ae248e136b1c20f6ff78af` after fetch. No remote push has yet been verified for this work.
+- The former installer fixture could select real `%LocalAppData%\SpeedMeterPro` for purge. Current account data impact cannot be conclusively established from available evidence. Installer and fixture guards now require owned targets and sentinel GUID test roots; see `docs/handoffs/V1-CONS-SAFETY-002.md` and the independent `docs/reviews/V1-CONS-SECURITY-002.md`. The reviewer still requested changes for the deferred batch and purge validation-to-delete race.
+- The isolated RC.2 lab app and Setup were built and test signed from the working tree for updater-seed testing only. They are not an authoritative RC.2 field artifact. RC.3 source version was advanced to `1.0.0-rc.3` / `1.0.0.3`; no clean-tree RC.3 field installer or release-source SHA has yet been recorded.
+- With `NuGetAudit=false` because the vulnerability feed returned `NU1900`, a Release build passed with zero warnings/errors. The executable standard runner passed **273 / 1 intentional skip / 0 failed** before the RC.3 version change, and guarded WPF smoke passed with live monitoring. A later Windows run yielded **280 passed / 1 skip / 1 failed** because the host WLAN query returned access-denied code 5 for its active Wi-Fi SSID. RC.3 version-adjusted regression remains pending.
+- Native accessibility remains **NOT VERIFIED**: the desktop helper timed out before opening Setup, and no keyboard/Narrator/DPI/contrast observations were claimed (`docs/reviews/V1-CONS-ACCESSIBILITY-002.md`). Process-level zero-network observation and the live one-click update/restart drill remain pending.
 
 ### RC.2 consumer integration observations (12 October 2026)
 

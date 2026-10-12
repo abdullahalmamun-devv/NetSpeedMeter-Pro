@@ -123,7 +123,9 @@ public static class UpdateVerificationService
         WriteIndented = true
     };
 
-    public static UpdateManifest ParseManifest(string json)
+    public static UpdateManifest ParseManifest(string json) => ParseManifest(json, allowLoopbackHttp: false);
+
+    internal static UpdateManifest ParseManifest(string json, bool allowLoopbackHttp)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
         var manifest = JsonSerializer.Deserialize<UpdateManifest>(json, JsonOptions)
@@ -146,7 +148,8 @@ public static class UpdateVerificationService
                 throw new InvalidOperationException("Manifest package SHA-256 hash is not hexadecimal.");
         if (manifest.PackageSizeBytes <= 0)
             throw new InvalidOperationException("Manifest package size must be positive.");
-        if (string.IsNullOrWhiteSpace(manifest.PackageUrl) || !Uri.TryCreate(manifest.PackageUrl, UriKind.Absolute, out var uri) || uri.Scheme != "https")
+        if (string.IsNullOrWhiteSpace(manifest.PackageUrl) || !Uri.TryCreate(manifest.PackageUrl, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttps && !(allowLoopbackHttp && uri.IsLoopback && uri.Scheme == Uri.UriSchemeHttp)))
             throw new InvalidOperationException("Manifest package URL must be an absolute HTTPS URL.");
         if (string.IsNullOrWhiteSpace(manifest.ReleaseNotesUrl) || !Uri.TryCreate(manifest.ReleaseNotesUrl, UriKind.Absolute, out var notesUri) || notesUri.Scheme != "https")
             throw new InvalidOperationException("Manifest release notes URL must be an absolute HTTPS URL.");
