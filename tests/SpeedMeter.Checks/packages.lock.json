@@ -50,16 +50,16 @@
       "speedmeter.app": {
         "type": "Project",
         "dependencies": {
-          "SpeedMeter.Application": "[1.0.0-rc.3, )",
-          "SpeedMeter.Core": "[1.0.0-rc.3, )",
-          "SpeedMeter.Windows": "[1.0.0-rc.3, )"
+          "SpeedMeter.Application": "[1.0.0-rc.4, )",
+          "SpeedMeter.Core": "[1.0.0-rc.4, )",
+          "SpeedMeter.Windows": "[1.0.0-rc.4, )"
         }
       },
       "speedmeter.application": {
         "type": "Project",
         "dependencies": {
-          "SpeedMeter.Core": "[1.0.0-rc.3, )",
-          "SpeedMeter.Storage": "[1.0.0-rc.3, )"
+          "SpeedMeter.Core": "[1.0.0-rc.4, )",
+          "SpeedMeter.Storage": "[1.0.0-rc.4, )"
         }
       },
       "speedmeter.core": {
@@ -70,19 +70,25 @@
         "dependencies": {
           "Microsoft.Data.Sqlite": "[9.0.2, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[2.1.12, )",
-          "SpeedMeter.Core": "[1.0.0-rc.3, )"
+          "SpeedMeter.Core": "[1.0.0-rc.4, )"
         }
       },
       "speedmeter.windows": {
         "type": "Project",
         "dependencies": {
-          "SpeedMeter.Core": "[1.0.0-rc.3, )"
+          "SpeedMeter.Core": "[1.0.0-rc.4, )"
         }
       },
       "SpeedMeterPro-Setup": {
         "type": "Project",
         "dependencies": {
-          "SpeedMeter.Core": "[1.0.0-rc.3, )"
+          "SpeedMeter.Core": "[1.0.0-rc.4, )"
+        }
+      },
+      "SpeedMeterPro.TempCleanup": {
+        "type": "Project",
+        "dependencies": {
+          "SpeedMeter.Core": "[1.0.0-rc.4, )"
         }
       }
     },

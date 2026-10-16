@@ -200,6 +200,46 @@ try {
         $cleanupResult.TargetHash -ne $targetHash -or -not $cleanupResult.Nonce) {
         throw "Uninstaller drill failed: no matching helper completion within 30 seconds."
     }
+    # The external uninstaller itself is a copied Setup. A separate signed
+    # janitor must remove that large running copy after it exits. Require the
+    # exact nonce directory to disappear before calling the drill complete.
+    $nonceGuid = [Guid]::Empty
+    if (-not [Guid]::TryParseExact([string]$cleanupResult.Nonce, 'N', [ref]$nonceGuid)) {
+        throw 'Uninstaller drill failed: helper completion nonce is invalid.'
+    }
+    $nonceDir = Join-Path (Join-Path $env:TEMP 'SpeedMeterPro.Cleanup') $cleanupResult.Nonce
+    $janitorResultPath = Join-Path (Join-Path $env:TEMP 'SpeedMeterPro.Cleanup') ("janitor-result-$($cleanupResult.Nonce).txt")
+    $janitorWait = [System.Diagnostics.Stopwatch]::StartNew()
+    $janitorState = $null
+    while ($janitorWait.Elapsed -lt [TimeSpan]::FromSeconds(30)) {
+        if (Test-Path -LiteralPath $janitorResultPath) {
+            $janitorLines = @(Get-Content -LiteralPath $janitorResultPath -TotalCount 2)
+            $janitorState = $janitorLines[0]
+            if ($janitorState -eq 'Failed') {
+                throw "Uninstaller janitor failed: $($janitorLines -join ' ')"
+            }
+            if ($janitorState -eq 'Completed') { break }
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if ($janitorState -ne 'Completed' -or (Test-Path -LiteralPath $nonceDir)) {
+        throw "Uninstaller drill failed: signed janitor did not confirm removal of out-of-tree Setup: $nonceDir"
+    }
+    $janitorExe = Join-Path (Join-Path $env:TEMP 'SpeedMeterPro.Cleanup') 'SpeedMeterPro.TempCleanup.exe'
+    if (-not (Test-Path -LiteralPath $janitorExe)) {
+        throw 'Uninstaller drill failed: dedicated signed janitor is missing.'
+    }
+    $janitorInfo = Get-Item -LiteralPath $janitorExe
+    if ($janitorInfo.Length -le 0 -or $janitorInfo.Length -ge 20MB) {
+        throw "Uninstaller drill failed: dedicated janitor size is out of bounds ($($janitorInfo.Length) bytes)."
+    }
+    $janitorSig = Get-AuthenticodeSignature -FilePath $janitorExe
+    if (($SignMode -eq 'Production' -and $janitorSig.Status -ne 'Valid') -or
+        ($SignMode -eq 'Test' -and $janitorSig.Status -notin @('Valid', 'UnknownError')) -or
+        $janitorSig.SignerCertificate.Subject -notlike '*SpeedMeter Pro*') {
+        throw "Uninstaller drill failed: dedicated janitor signature/publisher was rejected ($($janitorSig.Status))."
+    }
+    Write-Host "Dedicated signed janitor: $($janitorInfo.Length) bytes; Authenticode $($janitorSig.Status)." -ForegroundColor Green
     $quarantine = @(Get-ChildItem -LiteralPath $drillRoot -Directory -Force |
         Where-Object { $_.Name -like '.install.removing.*' })
     if ((Test-Path -LiteralPath $drillDir) -or $quarantine.Count -ne 0) {

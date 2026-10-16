@@ -78,9 +78,11 @@ internal static class Program
                     isUninstall, targetDir, payloadPath, payloadStream,
                     purgeData, noLaunch, launchAfterInstall);
                 ui.Run(window);
-                if (externalHelper && targetDir is not null)
-                    UninstallBootstrap.WriteResult(targetDir, window.ExitCode == 0,
-                        window.ExitCode == 0 ? "Uninstall completed." : "Uninstall was canceled or did not complete.");
+                if (externalHelper && targetDir is not null &&
+                    !UninstallBootstrap.WriteResult(targetDir, window.ExitCode == 0,
+                        window.ExitCode == 0 ? "Uninstall completed." : "Uninstall was canceled or did not complete.") &&
+                    window.ExitCode == 0)
+                    return 1;
                 return window.ExitCode;
             }
 
@@ -93,8 +95,9 @@ internal static class Program
                     Log: Log);
 
                 InstallerEngine.UninstallAsync(uninstallOptions).GetAwaiter().GetResult();
-                if (externalHelper && targetDir is not null)
-                    UninstallBootstrap.WriteResult(targetDir, true, "Uninstall completed.");
+                if (externalHelper && targetDir is not null &&
+                    !UninstallBootstrap.WriteResult(targetDir, true, "Uninstall completed."))
+                    return 1;
                 return 0;
             }
 

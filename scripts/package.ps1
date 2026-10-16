@@ -88,7 +88,27 @@ Compress-Archive -Path "$scDir\*" -DestinationPath $scZip -CompressionLevel Opti
 Write-Host "Creating Framework-Dependent ZIP archive: $fddZip..." -ForegroundColor Yellow
 Compress-Archive -Path "$fddDir\*" -DestinationPath $fddZip -CompressionLevel Optimal
 
-# 6. Build and Publish Standalone Canonical Installer
+# 6. Publish and sign the small, self-contained temp cleanup executable before
+# embedding it in Setup. The installed uninstaller uses this only to remove its
+# out-of-tree running copy after the main cleanup process exits.
+$cleanupPublishDir = Join-Path $releaseRoot 'tmp_cleanup_build'
+if (Test-Path -LiteralPath $cleanupPublishDir) {
+    Remove-GuardedReleaseDirectory $cleanupPublishDir
+}
+Write-Host "Publishing dedicated temporary cleanup executable..." -ForegroundColor Yellow
+& $dotnetPath publish (Join-Path $projectRoot 'src\SpeedMeter.Cleanup\SpeedMeter.Cleanup.csproj') `
+    -c $Configuration `
+    -r $Runtime `
+    --self-contained true `
+    -o $cleanupPublishDir `
+    --nologo
+if ($LASTEXITCODE -ne 0) { throw 'Temporary cleanup publish failed.' }
+$cleanupExe = Join-Path $cleanupPublishDir 'SpeedMeterPro.TempCleanup.exe'
+if (-not (Test-Path -LiteralPath $cleanupExe)) { throw 'Temporary cleanup executable is missing.' }
+& (Join-Path $PSScriptRoot 'sign.ps1') -TargetFile $cleanupExe -Mode $SignMode
+if ($LASTEXITCODE -ne 0) { throw 'Temporary cleanup signing failed.' }
+
+# 7. Build and Publish Standalone Canonical Installer
 Write-Host "Building standalone canonical installer (SpeedMeterPro-$Version-Setup.exe)..." -ForegroundColor Yellow
 $setupPublishDir = Join-Path $releaseRoot 'tmp_setup_build'
 if (Test-Path -LiteralPath $setupPublishDir) {
@@ -102,6 +122,7 @@ if (Test-Path -LiteralPath $setupPublishDir) {
     /p:PublishSingleFile=true `
     /p:IncludeNativeLibrariesForSelfExtract=true `
     /p:PayloadZipPath="$scZip" `
+    /p:TempCleanupExePath="$cleanupExe" `
     -o $setupPublishDir `
     --nologo
 if ($LASTEXITCODE -ne 0) { throw "Dotnet publish installer failed." }
@@ -115,6 +136,7 @@ if (-not (Test-Path -LiteralPath $setupExeSource)) {
 
 Copy-Item -Path $setupExeSource -Destination $setupExeTarget -Force
 Remove-GuardedReleaseDirectory $setupPublishDir
+Remove-GuardedReleaseDirectory $cleanupPublishDir
 
 # Sign Standalone Setup.exe
 Write-Host "Signing Standalone Installer: $setupExeTarget..." -ForegroundColor Yellow

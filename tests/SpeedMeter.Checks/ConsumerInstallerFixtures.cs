@@ -1,5 +1,7 @@
 using System.IO;
 using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -282,6 +284,166 @@ public static class ConsumerInstallerFixtures
             finally { TestDeleteGuard.DeleteRoot(root); }
         });
 
+        check("CONS-SAFETY janitor preflight rejects arbitrary request, nonce, parent and hash tampering", () =>
+        {
+            var root = TestDeleteGuard.CreateRoot();
+            try
+            {
+                var janitorParent = Path.Combine(root, "cleanup");
+                var nonce = Guid.NewGuid().ToString("N");
+                var requestDir = Path.Combine(janitorParent, nonce);
+                Directory.CreateDirectory(requestDir);
+                var janitor = Path.Combine(janitorParent, "SpeedMeterPro.TempCleanup.exe");
+                var setup = Path.Combine(requestDir, "Uninstall.exe");
+                var request = Path.Combine(requestDir, "janitor.req");
+                var unrelated = Path.Combine(root, "Unrelated", "retain.txt");
+                Directory.CreateDirectory(Path.GetDirectoryName(unrelated)!);
+                File.WriteAllText(unrelated, "retain");
+                File.WriteAllText(janitor, "fixture janitor");
+                File.WriteAllText(setup, "fixture temporary setup");
+                using var parent = Process.GetCurrentProcess();
+                var good = new[]
+                {
+                    "SpeedMeterPro.TempCleanup.v1", nonce,
+                    parent.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    parent.StartTime.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(setup))),
+                    new string('A', 64), "ProductRemoved", "Silent"
+                };
+                void Write(string[] lines) => File.WriteAllLines(request, lines);
+                void Validate() => InvokeJanitor("ValidateRequestForTests", request, root, janitor, setup);
+                void ValidateParent() => InvokeJanitor("ValidateParentForTests", request, root, janitor, setup);
+                Write(good);
+                Validate();
+
+                var wrongDir = Path.Combine(root, "Arbitrary");
+                Directory.CreateDirectory(wrongDir);
+                var wrongRequest = Path.Combine(wrongDir, "janitor.req");
+                File.WriteAllLines(wrongRequest, good);
+                Rejects(() => InvokeJanitor("ValidateRequestForTests", wrongRequest, root, janitor, setup),
+                    "Janitor accepted a request outside its nonce directory.");
+                var changed = (string[])good.Clone();
+                changed[1] = Guid.NewGuid().ToString("N");
+                Write(changed);
+                Rejects(Validate, "Janitor accepted a mismatched request nonce.");
+                changed = (string[])good.Clone();
+                changed[2] = "0";
+                Write(changed);
+                Rejects(Validate, "Janitor accepted a missing parent PID.");
+                changed = (string[])good.Clone();
+                changed[3] = "0";
+                Write(changed);
+                Rejects(Validate, "Janitor accepted missing parent start-time context.");
+                changed = (string[])good.Clone();
+                changed[2] = int.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                Write(changed);
+                try
+                {
+                    ValidateParent();
+                    throw new InvalidOperationException("Janitor accepted a nonexistent parent PID.");
+                }
+                catch (ArgumentException) { /* Process.GetProcessById fails closed. */ }
+                changed = (string[])good.Clone();
+                changed[3] = (parent.StartTime.ToUniversalTime().Ticks - 1)
+                    .ToString(System.Globalization.CultureInfo.InvariantCulture);
+                Write(changed);
+                Rejects(ValidateParent, "Janitor accepted a stale parent start time.");
+                Write(good);
+                Rejects(ValidateParent, "Janitor accepted a parent whose executable is not the temporary setup.");
+                changed = (string[])good.Clone();
+                changed[4] = new string('0', 64);
+                Write(changed);
+                Rejects(Validate, "Janitor accepted a modified expected setup hash.");
+                Write(good);
+                File.AppendAllText(setup, "tampered");
+                Rejects(Validate, "Janitor accepted a modified setup executable.");
+                Require(File.ReadAllText(unrelated) == "retain" && File.Exists(setup),
+                    "Rejected janitor requests changed an unrelated file or temporary setup.");
+            }
+            finally { TestDeleteGuard.DeleteRoot(root); }
+        });
+
+        check("CONS-SAFETY janitor rejects a reparse component inserted after preflight", () =>
+        {
+            var root = TestDeleteGuard.CreateRoot();
+            try
+            {
+                var janitorParent = Path.Combine(root, "cleanup");
+                var nonce = Guid.NewGuid().ToString("N");
+                var requestDir = Path.Combine(janitorParent, nonce);
+                Directory.CreateDirectory(requestDir);
+                var janitor = Path.Combine(janitorParent, "SpeedMeterPro.TempCleanup.exe");
+                var setup = Path.Combine(requestDir, "Uninstall.exe");
+                var request = Path.Combine(requestDir, "janitor.req");
+                File.WriteAllText(janitor, "fixture janitor");
+                File.WriteAllText(setup, "fixture temporary setup");
+                using var parent = Process.GetCurrentProcess();
+                File.WriteAllLines(request,
+                [
+                    "SpeedMeterPro.TempCleanup.v1", nonce,
+                    parent.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    parent.StartTime.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(setup))),
+                    new string('A', 64), "ProductRemoved", "Silent"
+                ]);
+                InvokeJanitor("ValidateRequestForTests", request, root, janitor, setup);
+                var backing = Path.Combine(janitorParent, "backing");
+                Directory.Move(requestDir, backing);
+                if (!TryCreateReparseAlias(requestDir, backing))
+                    throw new SkipCheckException("Neither directory symbolic links nor junctions are available for janitor reparse testing.");
+                try
+                {
+                    Rejects(() => InvokeJanitor("ValidateRequestForTests", request, root, janitor, setup),
+                        "Janitor accepted a reparse component inserted after earlier validation.");
+                    Require(File.Exists(Path.Combine(backing, "Uninstall.exe")),
+                        "Rejected janitor reparse insertion removed the temporary setup.");
+                }
+                finally { Directory.Delete(requestDir); }
+            }
+            finally { TestDeleteGuard.DeleteRoot(root); }
+        });
+
+        check("CONS-SAFETY janitor rechecks setup identity and deletes only verified temp files", () =>
+        {
+            var root = TestDeleteGuard.CreateRoot();
+            try
+            {
+                var janitorParent = Path.Combine(root, "cleanup");
+                var nonce = Guid.NewGuid().ToString("N");
+                var requestDir = Path.Combine(janitorParent, nonce);
+                Directory.CreateDirectory(requestDir);
+                var janitor = Path.Combine(janitorParent, "SpeedMeterPro.TempCleanup.exe");
+                var setup = Path.Combine(requestDir, "Uninstall.exe");
+                var request = Path.Combine(requestDir, "janitor.req");
+                var sibling = Path.Combine(root, "Unrelated", "retain.txt");
+                Directory.CreateDirectory(Path.GetDirectoryName(sibling)!);
+                File.WriteAllText(sibling, "retain");
+                File.WriteAllText(janitor, "fixture janitor");
+                File.WriteAllText(setup, "fixture temporary setup");
+                using var parent = Process.GetCurrentProcess();
+                File.WriteAllLines(request,
+                [
+                    "SpeedMeterPro.TempCleanup.v1", nonce,
+                    parent.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    parent.StartTime.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(setup))),
+                    new string('A', 64), "ProductRemoved", "Silent"
+                ]);
+                InvokeJanitor("ValidateRequestForTests", request, root, janitor, setup);
+                File.AppendAllText(setup, "changed after preflight");
+                Rejects(() => InvokeJanitor("DeleteVerifiedSetupForTests", request, root, janitor, setup),
+                    "Janitor deleted a setup copy modified after preflight.");
+                Require(File.Exists(setup) && File.ReadAllText(sibling) == "retain",
+                    "Rejected janitor cleanup changed temporary setup or an unrelated sibling.");
+                File.WriteAllText(setup, "fixture temporary setup");
+                InvokeJanitor("DeleteVerifiedSetupForTests", request, root, janitor, setup);
+                Require(!Directory.Exists(requestDir), "Janitor retained its verified temp setup/request directory.");
+                Require(File.Exists(janitor) && File.ReadAllText(sibling) == "retain",
+                    "Janitor cleanup changed its shared executable or an unrelated sibling.");
+            }
+            finally { TestDeleteGuard.DeleteRoot(root); }
+        });
+
         check("CONS-SAFETY test purge accepts only the sentinelled disposable root", () =>
         {
             var root = TestDeleteGuard.CreateRoot();
@@ -419,6 +581,28 @@ public static class ConsumerInstallerFixtures
     private sealed record CleanupRequestFixture(
         string Target, string SourceExecutable, string SourceSha256,
         int ParentPid, long ParentStartUtcTicks, string Nonce, string[] OriginalArgs);
+
+    private static readonly Lazy<Type> JanitorType = new(() =>
+    {
+        var assemblyPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "src", "SpeedMeter.Cleanup", "bin", "Release",
+            "net10.0", "win-x64", "SpeedMeterPro.TempCleanup.dll"));
+        if (!File.Exists(assemblyPath))
+            throw new InvalidOperationException("Build SpeedMeter.Cleanup before running janitor contract fixtures.");
+        return Assembly.LoadFrom(assemblyPath).GetType("SpeedMeter.Cleanup.Program", throwOnError: true)!;
+    });
+
+    private static void InvokeJanitor(string methodName, params string[] args)
+    {
+        var method = JanitorType.Value.GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("Janitor contract method is unavailable: " + methodName);
+        try { method.Invoke(null, args.Cast<object>().ToArray()); }
+        catch (TargetInvocationException ex) when (ex.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw;
+        }
+    }
 
     private static bool TryCreateReparseAlias(string alias, string inside)
     {

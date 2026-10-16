@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -20,8 +21,11 @@ internal static class UninstallBootstrap
     private const string HelperName = "Uninstall.exe";
     private const string MarkerName = ".speedmeter-pro-install-root";
     private const string Mode = "-CleanupExecutor";
+    private const string JanitorName = "SpeedMeterPro.TempCleanup.exe";
+    private const string JanitorRequestName = "janitor.req";
     private static readonly string HelperParent = Path.Combine(Path.GetTempPath(), "SpeedMeterPro.Cleanup");
     private static string? _currentNonce;
+    private static bool _currentSilent;
 
     private sealed record CleanupRequest(
         string Target, string SourceExecutable, string SourceSha256,
@@ -51,10 +55,11 @@ internal static class UninstallBootstrap
 
     internal static string ResultPath(string target) => Path.Combine(HelperParent, "result-" + TargetHash(target) + ".json");
 
-    internal static void WriteResult(string target, bool success, string message)
+    internal static bool WriteResult(string target, bool success, string message)
     {
-        if (_currentNonce is null) return;
-        WriteResultFile(target, _currentNonce, success ? "Completed" : "Failed", message);
+        if (_currentNonce is null) return false;
+        WriteResultFile(target, _currentNonce, success ? "ProductRemoved" : "Failed", message);
+        return TryStartJanitor(_currentNonce, target, success);
     }
 
     private static void WriteResultFile(string target, string nonce, string state, string message)
@@ -81,6 +86,7 @@ internal static class UninstallBootstrap
         if (SameOrChild(target, HelperParent))
             throw new InvalidOperationException("Cleanup helper location must be outside the installation.");
         PruneStaleHelpers();
+        EnsureJanitor();
         var nonce = Guid.NewGuid().ToString("N");
         var helperDir = Path.Combine(HelperParent, nonce);
         Directory.CreateDirectory(helperDir);
@@ -131,8 +137,13 @@ internal static class UninstallBootstrap
         InstallerEngine.ValidateUninstallRequest(new UninstallOptions(request.Target));
         RequireOwnedMarker(request.Target);
         _currentNonce = request.Nonce;
+        _currentSilent = request.OriginalArgs.Any(a => a.Equals("-Silent", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("/SILENT", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("-s", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("/s", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("/qn", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("-qn", StringComparison.OrdinalIgnoreCase));
         try { File.Delete(requestPath); } catch { }
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => TryScheduleCurrentHelperCleanup(Path.GetDirectoryName(requestPath)!);
         return (request.Target, request.OriginalArgs);
     }
 
@@ -270,6 +281,99 @@ internal static class UninstallBootstrap
         }
     }
 
+    private static void EnsureJanitor()
+    {
+        using var embedded = Assembly.GetExecutingAssembly().GetManifestResourceStream("temp-cleanup.exe")
+            ?? throw new InvalidOperationException("The signed temporary cleanup component is missing.");
+        var expectedHash = Convert.ToHexString(SHA256.HashData(embedded));
+        embedded.Position = 0;
+        var installed = Path.Combine(HelperParent, JanitorName);
+        RejectReparsePath(installed);
+        if (File.Exists(installed) && string.Equals(Hash(installed), expectedHash, StringComparison.Ordinal)) return;
+        var staging = installed + ".new." + Guid.NewGuid().ToString("N");
+        using (var output = new FileStream(staging, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            embedded.CopyTo(output);
+        if (!string.Equals(Hash(staging), expectedHash, StringComparison.Ordinal))
+            throw new InvalidOperationException("Temporary cleanup component integrity check failed.");
+        File.Move(staging, installed, overwrite: true);
+        if (!string.Equals(Hash(installed), expectedHash, StringComparison.Ordinal))
+            throw new InvalidOperationException("Temporary cleanup component changed after extraction.");
+    }
+
+    private static bool TryStartJanitor(string nonce, string target, bool productRemoved)
+    {
+        try
+        {
+            var dir = Path.Combine(HelperParent, nonce);
+            var current = Environment.ProcessPath
+                ?? throw new InvalidOperationException("Temporary setup identity is unavailable.");
+            if (!Guid.TryParseExact(nonce, "N", out _) ||
+                !SamePath(Path.GetDirectoryName(current)!, dir) ||
+                !string.Equals(Path.GetFileName(current), HelperName, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Temporary setup location changed.");
+            RejectReparsePath(current);
+            var janitor = Path.Combine(HelperParent, JanitorName);
+            RejectReparsePath(janitor);
+            using var embedded = Assembly.GetExecutingAssembly().GetManifestResourceStream("temp-cleanup.exe")
+                ?? throw new InvalidOperationException("Temporary cleanup component is missing.");
+            if (!string.Equals(Hash(janitor), Convert.ToHexString(SHA256.HashData(embedded)), StringComparison.Ordinal))
+                throw new InvalidOperationException("Temporary cleanup component identity changed.");
+            using var parent = Process.GetCurrentProcess();
+            var request = Path.Combine(dir, JanitorRequestName);
+            RejectReparsePath(dir);
+            using (var stream = new FileStream(request, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (var writer = new StreamWriter(stream))
+            {
+                writer.WriteLine("SpeedMeterPro.TempCleanup.v1");
+                writer.WriteLine(nonce);
+                writer.WriteLine(parent.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                writer.WriteLine(parent.StartTime.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                writer.WriteLine(Hash(current));
+                writer.WriteLine(TargetHash(target));
+                writer.WriteLine(productRemoved ? "ProductRemoved" : "Failed");
+                writer.WriteLine(_currentSilent ? "Silent" : "Interactive");
+            }
+            WriteJanitorResult(nonce, "Pending", "Waiting for temporary setup to exit.");
+            using var pipe = new NamedPipeServerStream("SpeedMeterPro.TempCleanup." + nonce, PipeDirection.InOut,
+                1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            var start = new ProcessStartInfo(janitor) { UseShellExecute = false, CreateNoWindow = true,
+                WorkingDirectory = HelperParent };
+            start.ArgumentList.Add(request);
+            using var child = Process.Start(start)
+                ?? throw new InvalidOperationException("Temporary cleanup component did not start.");
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            pipe.WaitForConnectionAsync(timeout.Token).GetAwaiter().GetResult();
+            if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle, out var clientPid) ||
+                clientPid != child.Id || pipe.ReadByte() != 0x53)
+                throw new InvalidOperationException("Temporary cleanup handshake failed.");
+            pipe.WriteByte(0x4D);
+            pipe.Flush();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogHandoffFailure("Temporary setup cleanup could not start: " + ex.Message);
+            if (productRemoved)
+                try { WriteResultFile(target, nonce, "Failed", "Product was removed, but the temporary setup copy may remain."); }
+                catch { }
+            try { WriteJanitorResult(nonce, "Failed", ex.Message); } catch { }
+            if (productRemoved && !_currentSilent)
+                System.Windows.MessageBox.Show(
+                    "SpeedMeter Pro was removed, but its temporary setup copy could not be cleaned up. Check the setup cleanup log in your Temp folder.",
+                    "SpeedMeter Pro cleanup incomplete", System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Warning);
+            return false;
+        }
+    }
+
+    private static void WriteJanitorResult(string nonce, string state, string message)
+    {
+        var path = Path.Combine(HelperParent, "janitor-result-" + nonce + ".txt");
+        var staging = path + ".tmp." + Guid.NewGuid().ToString("N");
+        File.WriteAllLines(staging, [state, message]);
+        File.Move(staging, path, overwrite: true);
+    }
+
     private static void PruneStaleHelpers()
     {
         foreach (var dir in Directory.EnumerateDirectories(HelperParent))
@@ -293,6 +397,20 @@ internal static class UninstallBootstrap
             }
             catch { /* Leave a changed or locked file alone. */ }
         }
+        foreach (var file in Directory.EnumerateFiles(HelperParent, "janitor-result-*.txt", SearchOption.TopDirectoryOnly))
+        {
+            try
+            {
+                var name = Path.GetFileName(file);
+                if (name.Length == 51 && name.StartsWith("janitor-result-", StringComparison.Ordinal) &&
+                    name.EndsWith(".txt", StringComparison.Ordinal) &&
+                    Guid.TryParseExact(name.Substring(15, 32), "N", out _) &&
+                    (File.GetAttributes(file) & FileAttributes.ReparsePoint) == 0 &&
+                    DateTime.UtcNow - File.GetLastWriteTimeUtc(file) >= TimeSpan.FromDays(30))
+                    File.Delete(file);
+            }
+            catch { }
+        }
     }
 
     private static void TryRemoveHelperCopy(string dir)
@@ -304,6 +422,7 @@ internal static class UninstallBootstrap
         if (entries.Any(entry =>
             (File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0 ||
             (!string.Equals(Path.GetFileName(entry), RequestName, StringComparison.Ordinal) &&
+             !string.Equals(Path.GetFileName(entry), JanitorRequestName, StringComparison.Ordinal) &&
              !string.Equals(Path.GetFileName(entry), HelperName, StringComparison.OrdinalIgnoreCase)))) return;
         var helper = Path.Combine(dir, HelperName);
         foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(HelperName)))
@@ -314,23 +433,10 @@ internal static class UninstallBootstrap
         }
         var request = Path.Combine(dir, RequestName);
         if (File.Exists(request)) File.Delete(request);
+        var janitorRequest = Path.Combine(dir, JanitorRequestName);
+        if (File.Exists(janitorRequest)) File.Delete(janitorRequest);
         if (File.Exists(helper)) File.Delete(helper);
         Directory.Delete(dir, recursive: false);
-    }
-
-    private static void TryScheduleCurrentHelperCleanup(string dir)
-    {
-        try
-        {
-            var helper = Path.Combine(dir, HelperName);
-            try { File.Delete(helper); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-            if (File.Exists(helper) && !MoveFileEx(helper, null, 0x00000004))
-                LogHandoffFailure("Temporary cleanup copy could not be removed or scheduled for restart: " + dir);
-            if (!File.Exists(helper)) Directory.Delete(dir, recursive: false);
-        }
-        catch { /* The next cleanup attempt prunes stale owned helper directories. */ }
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -341,7 +447,4 @@ internal static class UninstallBootstrap
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetNamedPipeServerProcessId(SafePipeHandle pipe, out int serverProcessId);
 
-    [DllImport("kernel32.dll", EntryPoint = "MoveFileExW", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool MoveFileEx(string existingPath, string? newPath, int flags);
 }
